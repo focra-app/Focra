@@ -44,11 +44,9 @@ export default function AnnotationTools() {
         </button>
       </div>
 
-      {(selectedTool === 'text' || selectedTool === 'arrow') && (
+      {selectedTool === 'text' && (
         <p className="text-xs text-text-muted bg-bg-tertiary rounded-lg p-2">
-          {selectedTool === 'text'
-            ? 'Click on the preview to place text'
-            : 'Click on the preview to place arrow (click & drag for direction)'}
+          Click on the preview to place text
         </p>
       )}
 

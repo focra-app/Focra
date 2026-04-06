@@ -138,7 +138,10 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         try {
           unsubscribeMouseClickRef.current = window.electronAPI.onMouseClick((data) => {
             if (mediaRecorderRef.current?.state === 'recording') {
-              mouseEventsRef.current.push({ ...data, type: 'click' })
+              // Normalize the timestamp to active recording time by subtracting any
+              // accumulated paused duration so keyframes align with the WebM timeline.
+              const normalizedTimestamp = Math.max(0, data.timestamp - pausedDurationRef.current)
+              mouseEventsRef.current.push({ ...data, timestamp: normalizedTimestamp, type: 'click' })
             }
           })
           await window.electronAPI.startMouseTracking(recordingStartTime)
@@ -255,21 +258,27 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const togglePause = () => {
     const rec = mediaRecorderRef.current
     if (!rec) return
-    if (isPaused) {
+
+    const currentState = rec.state
+
+    if (currentState === 'paused') {
       // Accumulate the duration of the pause we're ending
       if (pauseStartRef.current > 0) {
         pausedDurationRef.current += Date.now() - pauseStartRef.current
         pauseStartRef.current = 0
       }
       rec.resume()
+      // Always clear any stale interval before starting a new one
+      if (timerRef.current) clearInterval(timerRef.current)
       timerRef.current = setInterval(() => setElapsedTime((t) => t + 1), 1000)
-    } else {
+      setIsPaused(false)
+    } else if (currentState === 'recording') {
       // Mark the start of this pause
       pauseStartRef.current = Date.now()
       rec.pause()
       if (timerRef.current) clearInterval(timerRef.current)
+      setIsPaused(true)
     }
-    setIsPaused(!isPaused)
   }
 
   return (

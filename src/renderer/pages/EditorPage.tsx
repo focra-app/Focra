@@ -214,7 +214,7 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
                   <span className="text-sm font-semibold text-text-primary">Crop</span>
                 </div>
                 <p className="text-xs text-text-muted bg-bg-tertiary rounded-lg p-3">
-                  Crop settings adjust the visible area of your recording. Click and drag on the preview to define the crop region.
+                  Crop settings adjust the visible area of your recording. Use the X, Y, Width, and Height fields below to define the crop region.
                 </p>
                 <button
                   onClick={() => useEditorStore.getState().setCrop(null)}
