@@ -140,7 +140,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           )
           // Apply sensitivity: filter by spacing and clamp scale
           zoomKeyframes = rawKfs
-            .filter((_: ZoomKeyframe, i: number) => {
+            .filter((_kf: ZoomKeyframe, i: number) => {
               // Deterministic: keep every Nth keyframe based on sensitivity
               const keepEvery = Math.max(1, Math.round(1 / autoZoomSensitivity))
               return i % keepEvery === 0

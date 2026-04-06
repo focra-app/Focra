@@ -10,6 +10,11 @@ const PRESET_COLORS = [
   '#533483', '#2d132c', '#1b1b2f', '#222831'
 ]
 
+const DEFAULT_GRADIENT_STOPS = [
+  { color: '#8b5cf6', position: 0 },
+  { color: '#0f0f0f', position: 1 }
+]
+
 export default function BackgroundPanel() {
   const { project, setBackground } = useEditorStore()
   const [tab, setTab] = useState<Tab>('solid')
@@ -19,6 +24,16 @@ export default function BackgroundPanel() {
 
   const updateBg = (partial: Partial<Background>) => {
     setBackground({ ...bg, ...partial })
+  }
+
+  const updateGradientType = (t: 'linear' | 'radial') => {
+    updateBg({
+      gradient: {
+        ...bg.gradient,
+        type: t,
+        stops: bg.gradient?.stops ?? DEFAULT_GRADIENT_STOPS
+      }
+    })
   }
 
   return (
@@ -85,7 +100,7 @@ export default function BackgroundPanel() {
               {(['linear', 'radial'] as const).map((t) => (
                 <button
                   key={t}
-                  onClick={() => updateBg({ gradient: { ...bg.gradient!, type: t, stops: bg.gradient?.stops || [{ color: '#8b5cf6', position: 0 }, { color: '#0f0f0f', position: 1 }] } })}
+                  onClick={() => updateGradientType(t)}
                   className={`flex-1 text-xs py-1.5 rounded-md capitalize transition-colors
                     ${bg.gradient?.type === t ? 'bg-bg-secondary text-text-primary' : 'text-text-secondary'}`}
                 >

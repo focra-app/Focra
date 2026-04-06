@@ -65,7 +65,7 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
 
     video.addEventListener('timeupdate', onTimeUpdate)
     return () => video.removeEventListener('timeupdate', onTimeUpdate)
-  }, [project?.videoUrl, project?.trimPoints])
+  }, [project?.videoUrl, project?.trimPoints.inPoint, project?.trimPoints.outPoint])
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current
