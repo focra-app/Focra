@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
 
 permissions:
   contents: write
@@ -106,10 +112,21 @@ jobs:
         with:
           path: artifacts
 
+      - name: Determine tag name
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Focra ${{ github.ref_name }}
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Focra ${{ steps.tag.outputs.name }}
           draft: false
           prerelease: false
           generate_release_notes: true
