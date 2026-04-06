@@ -27,7 +27,14 @@ function createWindow(): BrowserWindow {
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    try {
+      const parsed = new URL(url)
+      if (['https:', 'http:', 'mailto:'].includes(parsed.protocol)) {
+        shell.openExternal(url)
+      }
+    } catch {
+      // Malformed URL — do nothing
+    }
     return { action: 'deny' }
   })
 

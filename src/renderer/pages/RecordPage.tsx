@@ -41,6 +41,9 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const displayStreamRef = useRef<MediaStream | null>(null)
   // Cleanup function returned by onMouseClick
   const unsubscribeMouseClickRef = useRef<(() => void) | null>(null)
+  // Track active recording time, excluding any paused intervals
+  const pausedDurationRef = useRef<number>(0)  // accumulated paused ms
+  const pauseStartRef = useRef<number>(0)       // timestamp of current pause start
 
   // Clean up mouse tracking subscription on unmount
   useEffect(() => {
@@ -102,6 +105,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       chunksRef.current = []
       mouseEventsRef.current = []
+      pausedDurationRef.current = 0
+      pauseStartRef.current = 0
       const recordingStartTime = Date.now()
       startTimeRef.current = recordingStartTime
 
@@ -120,14 +125,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         recorder.start(1000)
       } catch (recorderError) {
         // MediaRecorder construction/start failed — clean up all acquired resources
-        combinedStream.getTracks().forEach((t) => t.stop())
-        displayStreamRef.current?.getTracks().forEach((t) => t.stop())
-        displayStreamRef.current = null
-        micStreamRef.current?.getTracks().forEach((t) => t.stop())
-        micStreamRef.current = null
-        audioContextRef.current?.close()
-        audioContextRef.current = null
-        streamRef.current = null
+        cancelRecordingResources()
         throw recorderError
       }
 
@@ -137,12 +135,21 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       // app windows (i.e. the recorded screen) are captured for auto-zoom.
       if (autoZoomEnabled) {
         unsubscribeMouseClickRef.current?.()
-        unsubscribeMouseClickRef.current = window.electronAPI.onMouseClick((data) => {
-          if (mediaRecorderRef.current?.state === 'recording') {
-            mouseEventsRef.current.push({ ...data, type: 'click' })
-          }
-        })
-        await window.electronAPI.startMouseTracking(recordingStartTime)
+        try {
+          unsubscribeMouseClickRef.current = window.electronAPI.onMouseClick((data) => {
+            if (mediaRecorderRef.current?.state === 'recording') {
+              mouseEventsRef.current.push({ ...data, type: 'click' })
+            }
+          })
+          await window.electronAPI.startMouseTracking(recordingStartTime)
+        } catch (mouseTrackingError) {
+          // Mouse tracking failed — tear down the recorder and all acquired resources
+          unsubscribeMouseClickRef.current?.()
+          unsubscribeMouseClickRef.current = null
+          window.electronAPI.stopMouseTracking()
+          cancelRecordingResources()
+          throw mouseTrackingError
+        }
       }
 
       setIsRecording(true)
@@ -167,6 +174,32 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     audioContextRef.current = null
   }, [])
 
+  // Shared helper: stop the recorder, all stream tracks, audio resources, and reset state.
+  // Called from error paths in startRecording and from stopRecording.
+  const cancelRecordingResources = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    if (mediaRecorderRef.current) {
+      try { mediaRecorderRef.current.stop() } catch { /* already stopped */ }
+      mediaRecorderRef.current = null
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+    // Explicitly stop all display-stream and mic tracks in case any were not
+    // added to combinedStream (e.g. display audio tracks when mic mixing is active)
+    displayStreamRef.current?.getTracks().forEach((t) => t.stop())
+    micStreamRef.current?.getTracks().forEach((t) => t.stop())
+    // Reset pause tracking so the next recording starts fresh
+    pausedDurationRef.current = 0
+    pauseStartRef.current = 0
+    cleanupAudio()
+    setStream(null)
+    setIsRecording(false)
+    setIsPaused(false)
+  }, [cleanupAudio])
+
   const stopRecording = () => {
     if (!mediaRecorderRef.current) return
 
@@ -176,7 +209,14 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     unsubscribeMouseClickRef.current = null
 
     mediaRecorderRef.current.onstop = async () => {
-      const duration = (Date.now() - startTimeRef.current) / 1000
+      // Compute active recording time, excluding any time spent paused
+      const totalElapsed = Date.now() - startTimeRef.current
+      // If the recording was paused when stop() was called, count that segment too
+      const finalPausedMs =
+        pauseStartRef.current > 0
+          ? pausedDurationRef.current + (Date.now() - pauseStartRef.current)
+          : pausedDurationRef.current
+      const duration = (totalElapsed - finalPausedMs) / 1000
       const blob = new Blob(chunksRef.current, { type: 'video/webm' })
       const videoUrl = URL.createObjectURL(blob)
 
@@ -205,11 +245,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes })
 
-      streamRef.current?.getTracks().forEach((t) => t.stop())
-      cleanupAudio()
-      setStream(null)
-      setIsRecording(false)
-      setIsPaused(false)
+      cancelRecordingResources()
     }
 
     mediaRecorderRef.current.stop()
@@ -220,9 +256,16 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     const rec = mediaRecorderRef.current
     if (!rec) return
     if (isPaused) {
+      // Accumulate the duration of the pause we're ending
+      if (pauseStartRef.current > 0) {
+        pausedDurationRef.current += Date.now() - pauseStartRef.current
+        pauseStartRef.current = 0
+      }
       rec.resume()
       timerRef.current = setInterval(() => setElapsedTime((t) => t + 1), 1000)
     } else {
+      // Mark the start of this pause
+      pauseStartRef.current = Date.now()
       rec.pause()
       if (timerRef.current) clearInterval(timerRef.current)
     }
