@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Image, Palette } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
 import type { Background } from '../../types'
@@ -18,6 +18,17 @@ const DEFAULT_GRADIENT_STOPS = [
 export default function BackgroundPanel() {
   const { project, setBackground } = useEditorStore()
   const [tab, setTab] = useState<Tab>('solid')
+  // Track the last object URL created for image backgrounds so it can be revoked
+  const imageUrlRef = useRef<string | null>(null)
+
+  // Revoke the object URL when the component is unmounted
+  useEffect(() => {
+    return () => {
+      if (imageUrlRef.current) {
+        URL.revokeObjectURL(imageUrlRef.current)
+      }
+    }
+  }, [])
 
   if (!project) return null
   const bg = project.background
@@ -192,7 +203,12 @@ export default function BackgroundPanel() {
               input.onchange = (e) => {
                 const file = (e.target as HTMLInputElement).files?.[0]
                 if (file) {
+                  // Revoke the previous object URL before creating a new one
+                  if (imageUrlRef.current) {
+                    URL.revokeObjectURL(imageUrlRef.current)
+                  }
                   const url = URL.createObjectURL(file)
+                  imageUrlRef.current = url
                   updateBg({ imageUrl: url })
                 }
               }

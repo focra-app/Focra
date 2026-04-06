@@ -211,27 +211,28 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
   }, [renderFrame, videoRef])
 
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!project || selectedTool === 'select') return
+    if (!project) return
     const canvas = canvasRef.current!
     const rect = canvas.getBoundingClientRect()
     const x = (e.clientX - rect.left) / rect.width
     const y = (e.clientY - rect.top) / rect.height
 
-    if (selectedTool === 'text') {
-      const id = `ann-${Date.now()}`
-      addAnnotation({
-        id,
-        type: 'text',
-        time: currentTime,
-        duration: 3,
-        x,
-        y,
-        text: 'Click to edit',
-        fontSize: 24,
-        color: '#ffffff'
-      })
-    }
-  }, [project, selectedTool, currentTime, addAnnotation])
+    const id = `ann-${Date.now()}`
+    addAnnotation({
+      id,
+      type: 'text',
+      time: currentTime,
+      duration: 3,
+      x,
+      y,
+      text: 'Click to edit',
+      fontSize: 24,
+      color: '#ffffff'
+    })
+  }, [project, currentTime, addAnnotation])
+
+  // Only the text tool uses canvas click placement; arrow/crop tools are not yet supported
+  const isPlacementTool = selectedTool === 'text'
 
   return (
     <div className="relative w-full bg-black rounded-xl overflow-hidden border border-border">
@@ -239,9 +240,9 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         ref={canvasRef}
         width={1280}
         height={720}
-        className="w-full aspect-video cursor-crosshair"
-        onClick={handleCanvasClick}
-        style={{ cursor: selectedTool === 'select' ? 'default' : 'crosshair' }}
+        className="w-full aspect-video"
+        onClick={isPlacementTool ? handleCanvasClick : undefined}
+        style={{ cursor: isPlacementTool ? 'crosshair' : 'default' }}
       />
     </div>
   )

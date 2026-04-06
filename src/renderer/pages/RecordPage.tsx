@@ -37,6 +37,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   // Refs for proper cleanup of mic mixing resources
   const micStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  // Keep ref to the raw display stream so its audio tracks can be stopped on cleanup
+  const displayStreamRef = useRef<MediaStream | null>(null)
   // Cleanup function returned by onMouseClick
   const unsubscribeMouseClickRef = useRef<(() => void) | null>(null)
 
@@ -70,6 +72,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       let combinedStream = displayStream
       micStreamRef.current = null
       audioContextRef.current = null
+      displayStreamRef.current = displayStream
 
       if (micEnabled) {
         try {
@@ -140,6 +143,10 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const cleanupAudio = useCallback(() => {
     micStreamRef.current?.getTracks().forEach((t) => t.stop())
     micStreamRef.current = null
+    // Stop any display-stream audio tracks that were routed through the AudioContext
+    // (they're not part of combinedStream so they wouldn't be stopped otherwise)
+    displayStreamRef.current?.getAudioTracks().forEach((t) => t.stop())
+    displayStreamRef.current = null
     audioContextRef.current?.close()
     audioContextRef.current = null
   }, [])

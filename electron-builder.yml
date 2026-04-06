@@ -7,8 +7,7 @@ directories:
   buildResources: resources
 
 files:
-  - dist-electron
-  - dist
+  - out
 
 mac:
   category: public.app-category.video
