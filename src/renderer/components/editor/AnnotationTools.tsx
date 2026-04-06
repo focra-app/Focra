@@ -56,16 +56,17 @@ export default function AnnotationTools() {
           <p className="text-xs text-text-muted text-center py-2">No annotations yet</p>
         )}
         {project.annotations.map((ann) => (
-          <div
+          <button
             key={ann.id}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs cursor-pointer transition-colors
+            type="button"
+            className={`flex w-full items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-left transition-colors
               ${selectedAnnotationId === ann.id ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:bg-bg-tertiary'}`}
             onClick={() => useEditorStore.getState().selectAnnotation(ann.id)}
           >
             {ann.type === 'text' ? <Type size={11} /> : <ArrowRight size={11} />}
             <span className="truncate">{ann.type === 'text' ? (ann.text || 'Text') : 'Arrow'}</span>
             <span className="text-text-muted ml-auto">{ann.time.toFixed(1)}s</span>
-          </div>
+          </button>
         ))}
       </div>
 

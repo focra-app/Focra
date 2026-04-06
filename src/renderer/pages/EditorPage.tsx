@@ -233,8 +233,14 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
                         step={0.01}
                         value={(project.cropSettings?.[field] ?? (field === 'width' || field === 'height' ? 1 : 0)).toFixed(2)}
                         onChange={(e) => {
+                          const raw = parseFloat(e.target.value)
+                          if (isNaN(raw)) return
+                          const isSize = field === 'width' || field === 'height'
+                          const clamped = isSize
+                            ? Math.max(0.01, Math.min(1, raw))
+                            : Math.max(0, Math.min(1, raw))
                           const current = project.cropSettings || { x: 0, y: 0, width: 1, height: 1 }
-                          useEditorStore.getState().setCrop({ ...current, [field]: parseFloat(e.target.value) })
+                          useEditorStore.getState().setCrop({ ...current, [field]: clamped })
                         }}
                         className="input-field text-sm"
                       />

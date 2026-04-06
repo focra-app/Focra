@@ -3,8 +3,19 @@ import { randomUUID } from 'crypto'
 import { getDesktopSources, generateAutoZoomKeyframes, saveVideoFile } from './recorder'
 import type { MouseEvent } from './recorder'
 
-// One-time tokens for secure file saving: token → resolved filePath
-const pendingSavePaths = new Map<string, string>()
+// One-time tokens for secure file saving: token → { filePath, expiresAt }
+const TOKEN_TTL_MS = 5 * 60 * 1000 // 5 minutes
+const pendingSavePaths = new Map<string, { filePath: string; expiresAt: number }>()
+
+// Periodically remove tokens that were never redeemed (e.g. user cancelled export)
+setInterval(() => {
+  const now = Date.now()
+  for (const [token, entry] of pendingSavePaths) {
+    if (now > entry.expiresAt) {
+      pendingSavePaths.delete(token)
+    }
+  }
+}, TOKEN_TTL_MS).unref()
 
 // Global mouse tracking state
 let mouseTrackingInterval: ReturnType<typeof setInterval> | null = null
@@ -33,7 +44,7 @@ export function registerIpcHandlers(): void {
 
     if (!result.canceled && result.filePath) {
       const token = randomUUID()
-      pendingSavePaths.set(token, result.filePath)
+      pendingSavePaths.set(token, { filePath: result.filePath, expiresAt: Date.now() + TOKEN_TTL_MS })
       return { canceled: false, saveToken: token }
     }
     return { canceled: true, saveToken: null }
@@ -42,11 +53,13 @@ export function registerIpcHandlers(): void {
   // Accepts a one-time token (from show-save-dialog) instead of a raw file path to
   // prevent an arbitrary file-write primitive if the renderer is ever compromised.
   ipcMain.handle('save-file', async (_event, token: string, buffer: ArrayBuffer) => {
-    const filePath = pendingSavePaths.get(token)
-    if (!filePath) {
+    const entry = pendingSavePaths.get(token)
+    if (!entry || Date.now() > entry.expiresAt) {
+      pendingSavePaths.delete(token)
       return { success: false, error: 'Invalid or expired save token' }
     }
     pendingSavePaths.delete(token) // one-time use
+    const { filePath } = entry
     try {
       await saveVideoFile(Buffer.from(buffer), filePath)
       return { success: true }
