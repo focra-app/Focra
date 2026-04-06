@@ -50,7 +50,16 @@ export default function BackgroundPanel() {
             key={t}
             onClick={() => {
               setTab(t)
-              updateBg({ type: t })
+              if (t === 'gradient' && !bg.gradient) {
+                // Initialize gradient with defaults so editors never see undefined gradient
+                setBackground({
+                  ...bg,
+                  type: 'gradient',
+                  gradient: { type: 'linear', angle: 135, stops: DEFAULT_GRADIENT_STOPS }
+                })
+              } else {
+                updateBg({ type: t })
+              }
             }}
             className={`flex-1 text-xs py-1.5 rounded-md capitalize transition-colors
               ${tab === t ? 'bg-bg-secondary text-text-primary font-medium' : 'text-text-secondary hover:text-text-primary'}`}

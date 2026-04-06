@@ -34,19 +34,18 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const startTimeRef = useRef<number>(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  // Refs for proper cleanup of mic mixing resources
+  const micStreamRef = useRef<MediaStream | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  // Cleanup function returned by onMouseClick
+  const unsubscribeMouseClickRef = useRef<(() => void) | null>(null)
 
-  const trackMouseEvents = useCallback((e: globalThis.MouseEvent) => {
-    if (!isRecording || isPaused) return
-    const timestamp = Date.now() - startTimeRef.current
-    if (e.type === 'click') {
-      mouseEventsRef.current.push({ x: e.screenX, y: e.screenY, timestamp, type: 'click' })
-    }
-  }, [isRecording, isPaused])
-
+  // Clean up mouse tracking subscription on unmount
   useEffect(() => {
-    window.addEventListener('click', trackMouseEvents)
-    return () => window.removeEventListener('click', trackMouseEvents)
-  }, [trackMouseEvents])
+    return () => {
+      unsubscribeMouseClickRef.current?.()
+    }
+  }, [])
 
   const startRecording = async () => {
     if (!selectedSource) return
@@ -69,6 +68,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       })
 
       let combinedStream = displayStream
+      micStreamRef.current = null
+      audioContextRef.current = null
 
       if (micEnabled) {
         try {
@@ -85,6 +86,9 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             ...displayStream.getVideoTracks(),
             ...dest.stream.getTracks()
           ])
+          // Keep references for cleanup
+          micStreamRef.current = micStream
+          audioContextRef.current = audioContext
         } catch {
           // Mic not available, continue without it
         }
@@ -95,7 +99,20 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       chunksRef.current = []
       mouseEventsRef.current = []
-      startTimeRef.current = Date.now()
+      const recordingStartTime = Date.now()
+      startTimeRef.current = recordingStartTime
+
+      // Start global mouse tracking in the main process so clicks in other
+      // app windows (i.e. the recorded screen) are captured for auto-zoom.
+      if (autoZoomEnabled) {
+        unsubscribeMouseClickRef.current?.()
+        unsubscribeMouseClickRef.current = window.electronAPI.onMouseClick((data) => {
+          if (mediaRecorderRef.current?.state === 'recording') {
+            mouseEventsRef.current.push({ ...data, type: 'click' })
+          }
+        })
+        await window.electronAPI.startMouseTracking(recordingStartTime)
+      }
 
       const recorder = new MediaRecorder(combinedStream, {
         mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
@@ -120,8 +137,20 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     }
   }
 
+  const cleanupAudio = useCallback(() => {
+    micStreamRef.current?.getTracks().forEach((t) => t.stop())
+    micStreamRef.current = null
+    audioContextRef.current?.close()
+    audioContextRef.current = null
+  }, [])
+
   const stopRecording = () => {
     if (!mediaRecorderRef.current) return
+
+    // Stop global mouse tracking immediately
+    window.electronAPI.stopMouseTracking()
+    unsubscribeMouseClickRef.current?.()
+    unsubscribeMouseClickRef.current = null
 
     mediaRecorderRef.current.onstop = async () => {
       const duration = (Date.now() - startTimeRef.current) / 1000
@@ -154,6 +183,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes })
 
       streamRef.current?.getTracks().forEach((t) => t.stop())
+      cleanupAudio()
       setStream(null)
       setIsRecording(false)
       setIsPaused(false)
@@ -286,7 +316,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           />
           <p className="text-xs text-text-muted text-center">
             {isRecording
-              ? 'Recording in progress — mouse clicks will be tracked for auto-zoom'
+              ? 'Recording in progress — cursor dwell events tracked for auto-zoom'
               : 'Select a source and press Start Recording'}
           </p>
         </div>

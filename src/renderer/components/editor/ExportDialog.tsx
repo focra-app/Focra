@@ -10,7 +10,9 @@ interface ExportDialogProps {
 
 const ASPECT_RATIOS: ExportSettings['aspectRatio'][] = ['16:9', '4:3', '1:1', '9:16']
 const RESOLUTIONS: ExportSettings['resolution'][] = ['720p', '1080p', '1440p', '4k']
-const FORMATS: ExportSettings['format'][] = ['mp4', 'webm']
+// Only WebM is supported until a full transcode pipeline is added.
+// Offering MP4 would silently produce an invalid file (WebM bytes with .mp4 extension).
+const FORMATS: ExportSettings['format'][] = ['webm']
 const FPS_OPTIONS: ExportSettings['fps'][] = [30, 60]
 
 function AspectRatioIcon({ ratio }: { ratio: string }) {
@@ -46,15 +48,18 @@ export default function ExportDialog({ onClose, videoBlob }: ExportDialogProps) 
     setError(null)
     try {
       const result = await window.electronAPI.showSaveDialog(
-        `focra-export.${settings.format === 'mp4' ? 'mp4' : 'webm'}`
+        `focra-export.webm`
       )
-      if (result.canceled || !result.filePath) {
+      if (result.canceled || !result.saveToken) {
         setExporting(false)
         return
       }
 
       const buffer = await videoBlob.arrayBuffer()
-      await window.electronAPI.saveFile(buffer, result.filePath)
+      const saveResult = await window.electronAPI.saveFile(result.saveToken, buffer)
+      if (!saveResult.success) {
+        throw new Error(saveResult.error ?? 'Failed to save exported file')
+      }
       setDone(true)
     } catch (err) {
       setError(`Export failed: ${err instanceof Error ? err.message : String(err)}`)

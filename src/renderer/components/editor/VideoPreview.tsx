@@ -162,13 +162,53 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       }
     }
 
-    animFrameRef.current = requestAnimationFrame(renderFrame)
+    if (video && !video.paused && !video.ended) {
+      animFrameRef.current = requestAnimationFrame(renderFrame)
+    } else {
+      animFrameRef.current = 0
+    }
   }, [project, currentTime, videoRef])
 
   useEffect(() => {
-    animFrameRef.current = requestAnimationFrame(renderFrame)
-    return () => cancelAnimationFrame(animFrameRef.current)
-  }, [renderFrame])
+    const video = videoRef.current
+
+    const startRenderLoop = () => {
+      if (animFrameRef.current === 0) {
+        animFrameRef.current = requestAnimationFrame(renderFrame)
+      }
+    }
+
+    const renderSingleFrame = () => {
+      if (animFrameRef.current !== 0) {
+        cancelAnimationFrame(animFrameRef.current)
+        animFrameRef.current = 0
+      }
+      renderFrame()
+    }
+
+    // Render one frame immediately for initial state / when currentTime changes
+    renderSingleFrame()
+
+    if (video) {
+      video.addEventListener('play', startRenderLoop)
+      video.addEventListener('pause', renderSingleFrame)
+      video.addEventListener('ended', renderSingleFrame)
+      video.addEventListener('seeked', renderSingleFrame)
+    }
+
+    return () => {
+      if (video) {
+        video.removeEventListener('play', startRenderLoop)
+        video.removeEventListener('pause', renderSingleFrame)
+        video.removeEventListener('ended', renderSingleFrame)
+        video.removeEventListener('seeked', renderSingleFrame)
+      }
+      if (animFrameRef.current !== 0) {
+        cancelAnimationFrame(animFrameRef.current)
+        animFrameRef.current = 0
+      }
+    }
+  }, [renderFrame, videoRef])
 
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!project || selectedTool === 'select') return

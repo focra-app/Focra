@@ -20,7 +20,7 @@ interface EditorPageProps {
 type RightPanel = 'zoom' | 'annotations' | 'background' | 'crop'
 
 export default function EditorPage({ result, onBack }: EditorPageProps) {
-  const { loadProject, project, isPlaying, setCurrentTime, setIsPlaying, setSelectedTool } =
+  const { loadProject, project, isPlaying, setCurrentTime, setIsPlaying, setSelectedTool, selectedTool } =
     useEditorStore()
   const videoRef = useRef<HTMLVideoElement>(null)
   const [rightPanel, setRightPanel] = useState<RightPanel>('zoom')
@@ -127,21 +127,21 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
         <div className="no-drag flex items-center bg-bg-tertiary rounded-lg p-0.5 gap-0.5">
           <button
             onClick={() => { setSelectedTool('select'); }}
-            className={`p-1.5 rounded-md transition-colors ${useEditorStore.getState().selectedTool === 'select' ? 'bg-bg-secondary text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
+            className={`p-1.5 rounded-md transition-colors ${selectedTool === 'select' ? 'bg-bg-secondary text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
             title="Select"
           >
             <MousePointer size={15} />
           </button>
           <button
             onClick={() => { setSelectedTool('text'); setRightPanel('annotations'); }}
-            className={`p-1.5 rounded-md transition-colors ${useEditorStore.getState().selectedTool === 'text' ? 'bg-bg-secondary text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
+            className={`p-1.5 rounded-md transition-colors ${selectedTool === 'text' ? 'bg-bg-secondary text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
             title="Text"
           >
             <Type size={15} />
           </button>
           <button
             onClick={() => { setSelectedTool('crop'); setRightPanel('crop'); }}
-            className={`p-1.5 rounded-md transition-colors ${useEditorStore.getState().selectedTool === 'crop' ? 'bg-bg-secondary text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
+            className={`p-1.5 rounded-md transition-colors ${selectedTool === 'crop' ? 'bg-bg-secondary text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
             title="Crop"
           >
             <Crop size={15} />

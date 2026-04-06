@@ -1,4 +1,4 @@
-import { desktopCapturer, ipcMain, BrowserWindow } from 'electron'
+import { desktopCapturer } from 'electron'
 import { writeFile } from 'fs/promises'
 
 export interface MouseEvent {
