@@ -53,7 +53,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     setError(null)
 
     try {
-      const displayStream = await (navigator.mediaDevices as any).getUserMedia({
+      const displayStream = await navigator.mediaDevices.getUserMedia({
         audio: systemAudioEnabled
           ? { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id } }
           : false,
@@ -138,9 +138,13 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             screenSize.width,
             screenSize.height
           )
-          // Apply sensitivity: filter or adjust scale
+          // Apply sensitivity: filter by spacing and clamp scale
           zoomKeyframes = rawKfs
-            .filter(() => Math.random() < autoZoomSensitivity)
+            .filter((_: ZoomKeyframe, i: number) => {
+              // Deterministic: keep every Nth keyframe based on sensitivity
+              const keepEvery = Math.max(1, Math.round(1 / autoZoomSensitivity))
+              return i % keepEvery === 0
+            })
             .map((kf: ZoomKeyframe) => ({ ...kf, scale: 1 + (kf.scale - 1) * autoZoomSensitivity }))
         } catch {
           zoomKeyframes = []

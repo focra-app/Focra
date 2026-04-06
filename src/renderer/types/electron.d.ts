@@ -1,5 +1,10 @@
 import type { ZoomKeyframe } from '../types'
 
+interface ElectronMediaConstraints {
+  audio: false | { mandatory: { chromeMediaSource: string; chromeMediaSourceId: string } }
+  video: { mandatory: { chromeMediaSource: string; chromeMediaSourceId: string; maxWidth: number; maxHeight: number; maxFrameRate: number } }
+}
+
 interface ElectronAPI {
   getSources: () => Promise<import('../types').DesktopSource[]>
   showSaveDialog: (defaultName: string) => Promise<{ canceled: boolean; filePath?: string }>
@@ -16,6 +21,9 @@ interface ElectronAPI {
 declare global {
   interface Window {
     electronAPI: ElectronAPI
+  }
+  interface MediaDevices {
+    getUserMedia(constraints: ElectronMediaConstraints): Promise<MediaStream>
   }
 }
 

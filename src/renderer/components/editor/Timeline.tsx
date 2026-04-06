@@ -36,8 +36,10 @@ export default function Timeline({ videoRef }: TimelineProps) {
   const { inPoint, outPoint } = project.trimPoints
 
   const timeFromX = (clientX: number) => {
-    const rect = containerRef.current!.getBoundingClientRect()
-    const scrollLeft = containerRef.current!.scrollLeft
+    const container = containerRef.current
+    if (!container) return 0
+    const rect = container.getBoundingClientRect()
+    const scrollLeft = container.scrollLeft
     const x = clientX - rect.left + scrollLeft
     return Math.max(0, Math.min(duration, x / PIXELS_PER_SECOND))
   }
