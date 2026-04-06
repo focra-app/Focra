@@ -1,0 +1,27 @@
+appId: com.focra.app
+productName: Focra
+copyright: Copyright © 2024 Focra Contributors
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - out
+
+mac:
+  category: public.app-category.video
+  target:
+    - dmg
+    - zip
+
+win:
+  target:
+    - nsis
+    - zip
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Video
