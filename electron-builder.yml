@@ -2,6 +2,9 @@ appId: com.focra.app
 productName: Focra
 copyright: Copyright © 2024 Focra Contributors
 
+publish:
+  provider: github
+
 directories:
   output: release
   buildResources: resources
