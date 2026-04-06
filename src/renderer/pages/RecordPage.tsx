@@ -105,6 +105,34 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       const recordingStartTime = Date.now()
       startTimeRef.current = recordingStartTime
 
+      let recorder: MediaRecorder
+      try {
+        recorder = new MediaRecorder(combinedStream, {
+          mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+            ? 'video/webm;codecs=vp9,opus'
+            : 'video/webm'
+        })
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunksRef.current.push(e.data)
+        }
+
+        recorder.start(1000)
+      } catch (recorderError) {
+        // MediaRecorder construction/start failed — clean up all acquired resources
+        combinedStream.getTracks().forEach((t) => t.stop())
+        displayStreamRef.current?.getTracks().forEach((t) => t.stop())
+        displayStreamRef.current = null
+        micStreamRef.current?.getTracks().forEach((t) => t.stop())
+        micStreamRef.current = null
+        audioContextRef.current?.close()
+        audioContextRef.current = null
+        streamRef.current = null
+        throw recorderError
+      }
+
+      mediaRecorderRef.current = recorder
+
       // Start global mouse tracking in the main process so clicks in other
       // app windows (i.e. the recorded screen) are captured for auto-zoom.
       if (autoZoomEnabled) {
@@ -117,18 +145,6 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         await window.electronAPI.startMouseTracking(recordingStartTime)
       }
 
-      const recorder = new MediaRecorder(combinedStream, {
-        mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-          ? 'video/webm;codecs=vp9,opus'
-          : 'video/webm'
-      })
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data)
-      }
-
-      recorder.start(1000)
-      mediaRecorderRef.current = recorder
       setIsRecording(true)
       setElapsedTime(0)
 

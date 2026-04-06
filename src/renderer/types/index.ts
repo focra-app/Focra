@@ -43,7 +43,7 @@ export interface Background {
 export interface ExportSettings {
   aspectRatio: '16:9' | '4:3' | '1:1' | '9:16'
   resolution: '720p' | '1080p' | '1440p' | '4k'
-  format: 'mp4' | 'webm'
+  format: 'webm'
   fps: 30 | 60
 }
 

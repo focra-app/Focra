@@ -16,41 +16,52 @@ function cubicEase(t: number, easing: ZoomKeyframe['easing']): number {
 }
 
 function getZoomTransform(keyframes: ZoomKeyframe[], time: number) {
-  // Check if we're inside any keyframe
-  for (const kf of keyframes) {
+  // Pick the latest-starting keyframe that contains `time` so that
+  // overlapping/unsorted keyframes always resolve deterministically.
+  const activeKeyframe = keyframes.reduce<ZoomKeyframe | null>((latest, kf) => {
     const inTime = kf.time
     const outTime = kf.time + kf.duration
-    const halfDur = kf.duration * 0.25 // transition portion
+    if (time < inTime || time > outTime) return latest
+    if (latest === null || kf.time > latest.time) return kf
+    return latest
+  }, null)
 
-    if (time >= inTime && time <= outTime) {
-      let scale = 1
-      let progress = 0
-
-      if (time < inTime + halfDur) {
-        // Zoom in
-        progress = (time - inTime) / halfDur
-        scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
-      } else if (time > outTime - halfDur) {
-        // Zoom out
-        progress = (outTime - time) / halfDur
-        scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
-      } else {
-        // Hold
-        scale = kf.scale
-      }
-
-      const tx = (0.5 - kf.x) * (scale - 1)
-      const ty = (0.5 - kf.y) * (scale - 1)
-
-      return { scale, tx, ty, motionBlur: kf.motionBlur && scale > 1.05 }
-    }
+  if (!activeKeyframe) {
+    return { scale: 1, tx: 0, ty: 0, motionBlur: false }
   }
-  return { scale: 1, tx: 0, ty: 0, motionBlur: false }
+
+  const kf = activeKeyframe
+  const inTime = kf.time
+  const outTime = kf.time + kf.duration
+  const halfDur = kf.duration * 0.25 // transition portion
+
+  let scale = 1
+  let progress = 0
+
+  if (time < inTime + halfDur) {
+    // Zoom in
+    progress = (time - inTime) / halfDur
+    scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
+  } else if (time > outTime - halfDur) {
+    // Zoom out
+    progress = (outTime - time) / halfDur
+    scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
+  } else {
+    // Hold
+    scale = kf.scale
+  }
+
+  const tx = (0.5 - kf.x) * (scale - 1)
+  const ty = (0.5 - kf.y) * (scale - 1)
+
+  return { scale, tx, ty, motionBlur: kf.motionBlur && scale > 1.05 }
 }
 
 export default function VideoPreview({ videoRef }: VideoPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animFrameRef = useRef<number>(0)
+  // Cache the last-loaded background image so we don't reload on every frame
+  const bgImageRef = useRef<{ url: string; img: HTMLImageElement } | null>(null)
   const { project, currentTime, selectedTool, addAnnotation } = useEditorStore()
 
   const renderFrame = useCallback(() => {
@@ -61,6 +72,10 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
     const W = canvas.width
     const H = canvas.height
+
+    // Use video.currentTime while playing for frame-accurate animation;
+    // fall back to the store's currentTime when paused/seeking.
+    const renderTime = video && !video.paused && !video.ended ? video.currentTime : currentTime
 
     // Draw background
     const bg = project.background
@@ -83,13 +98,41 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       stops.forEach((s) => grad.addColorStop(s.position, s.color))
       ctx.fillStyle = grad
       ctx.fillRect(0, 0, W, H)
+    } else if (bg.type === 'image' && bg.imageUrl) {
+      // Load/cache the background image; render it cover-fitted to the canvas
+      if (bgImageRef.current?.url !== bg.imageUrl) {
+        const img = new Image()
+        img.onload = () => renderFrame()
+        img.src = bg.imageUrl
+        bgImageRef.current = { url: bg.imageUrl, img }
+      }
+      const bgImg = bgImageRef.current?.img
+      if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
+        const imgRatio = bgImg.naturalWidth / bgImg.naturalHeight
+        const canvasRatio = W / H
+        let sx = 0
+        let sy = 0
+        let sw = bgImg.naturalWidth
+        let sh = bgImg.naturalHeight
+        if (imgRatio > canvasRatio) {
+          sw = bgImg.naturalHeight * canvasRatio
+          sx = (bgImg.naturalWidth - sw) / 2
+        } else {
+          sh = bgImg.naturalWidth / canvasRatio
+          sy = (bgImg.naturalHeight - sh) / 2
+        }
+        ctx.drawImage(bgImg, sx, sy, sw, sh, 0, 0, W, H)
+      } else {
+        ctx.fillStyle = '#1a1a1a'
+        ctx.fillRect(0, 0, W, H)
+      }
     } else {
       ctx.fillStyle = '#1a1a1a'
       ctx.fillRect(0, 0, W, H)
     }
 
     if (video && video.readyState >= 2) {
-      const zoom = getZoomTransform(project.zoomKeyframes, currentTime)
+      const zoom = getZoomTransform(project.zoomKeyframes, renderTime)
       const { scale, tx, ty, motionBlur } = zoom
 
       // Apply crop or use full video
@@ -125,7 +168,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
       // Draw annotations
       const visibleAnnotations = project.annotations.filter(
-        (a) => currentTime >= a.time && currentTime <= a.time + a.duration
+        (a) => renderTime >= a.time && renderTime <= a.time + a.duration
       )
       for (const ann of visibleAnnotations) {
         const ax = ann.x * W
