@@ -16,6 +16,28 @@ interface RecordPageProps {
   onRecordingComplete: (result: RecordingResult) => void
 }
 
+interface ToggleSwitchProps {
+  enabled: boolean
+  onToggle: () => void
+}
+
+function ToggleSwitch({ enabled, onToggle }: ToggleSwitchProps) {
+  return (
+    <button
+      type="button"
+      aria-pressed={enabled}
+      onClick={onToggle}
+      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors duration-200
+        ${enabled ? 'bg-accent' : 'bg-border'}`}
+    >
+      <span
+        className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200
+          ${enabled ? 'translate-x-5' : 'translate-x-0'}`}
+      />
+    </button>
+  )
+}
+
 export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const [selectedSource, setSelectedSource] = useState<DesktopSource | null>(null)
   const [micEnabled, setMicEnabled] = useState(true)
@@ -58,6 +80,14 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     setError(null)
 
     try {
+      const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
+      captureBoundsRef.current = captureBounds
+      const targetWidth = Math.max(1280, Math.min(7680, captureBounds.width))
+      const targetHeight = Math.max(720, Math.min(4320, captureBounds.height))
+      const targetFrameRate = 60
+      const pixelRate = targetWidth * targetHeight * targetFrameRate
+      const videoBitsPerSecond = Math.min(45_000_000, Math.max(8_000_000, Math.round(pixelRate * 0.1)))
+
       const displayStream = await navigator.mediaDevices.getUserMedia({
         audio: systemAudioEnabled
           ? { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id } }
@@ -66,9 +96,12 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           mandatory: {
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: selectedSource.id,
-            maxWidth: 1920,
-            maxHeight: 1080,
-            maxFrameRate: 60
+            minWidth: Math.min(targetWidth, 1280),
+            minHeight: Math.min(targetHeight, 720),
+            maxWidth: targetWidth,
+            maxHeight: targetHeight,
+            minFrameRate: 30,
+            maxFrameRate: targetFrameRate
           }
         }
       })
@@ -108,18 +141,17 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       mouseEventsRef.current = []
       pausedDurationRef.current = 0
       pauseStartRef.current = 0
-      captureBoundsRef.current = null
       const recordingStartTime = Date.now()
       startTimeRef.current = recordingStartTime
-      const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
-      captureBoundsRef.current = captureBounds
 
       let recorder: MediaRecorder
       try {
         recorder = new MediaRecorder(combinedStream, {
           mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
             ? 'video/webm;codecs=vp9,opus'
-            : 'video/webm'
+            : 'video/webm',
+          videoBitsPerSecond,
+          audioBitsPerSecond: 128_000
         })
 
         recorder.ondataavailable = (e) => {
@@ -311,14 +343,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
                 <Mic size={15} className="text-text-secondary" />
                 Microphone
               </div>
-              <button
-                onClick={() => setMicEnabled(!micEnabled)}
-                className={`w-10 h-6 rounded-full transition-colors duration-200 relative
-                  ${micEnabled ? 'bg-accent' : 'bg-border'}`}
-              >
-                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
-                  ${micEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
+              <ToggleSwitch enabled={micEnabled} onToggle={() => setMicEnabled(!micEnabled)} />
             </div>
 
             <div className="flex items-center justify-between">
@@ -326,14 +351,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
                 <Volume2 size={15} className="text-text-secondary" />
                 System Audio
               </div>
-              <button
-                onClick={() => setSystemAudioEnabled(!systemAudioEnabled)}
-                className={`w-10 h-6 rounded-full transition-colors duration-200 relative
-                  ${systemAudioEnabled ? 'bg-accent' : 'bg-border'}`}
-              >
-                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
-                  ${systemAudioEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
+              <ToggleSwitch enabled={systemAudioEnabled} onToggle={() => setSystemAudioEnabled(!systemAudioEnabled)} />
             </div>
           </div>
 
@@ -342,14 +360,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
             <div className="flex items-center justify-between">
               <span className="text-sm text-text-primary">Enable Auto-Zoom</span>
-              <button
-                onClick={() => setAutoZoomEnabled(!autoZoomEnabled)}
-                className={`w-10 h-6 rounded-full transition-colors duration-200 relative
-                  ${autoZoomEnabled ? 'bg-accent' : 'bg-border'}`}
-              >
-                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
-                  ${autoZoomEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
+              <ToggleSwitch enabled={autoZoomEnabled} onToggle={() => setAutoZoomEnabled(!autoZoomEnabled)} />
             </div>
 
             {autoZoomEnabled && (
