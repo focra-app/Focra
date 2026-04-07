@@ -35,13 +35,16 @@ interface RecordPageProps {
 interface ToggleSwitchProps {
   enabled: boolean
   onToggle: () => void
+  label: string
 }
 
-function ToggleSwitch({ enabled, onToggle }: ToggleSwitchProps) {
+function ToggleSwitch({ enabled, onToggle, label }: ToggleSwitchProps) {
   return (
     <button
       type="button"
-      aria-pressed={enabled}
+      role="switch"
+      aria-checked={enabled}
+      aria-label={label}
       onClick={onToggle}
       className={`relative inline-flex flex-shrink-0 items-center rounded-full transition-colors duration-200
         ${enabled ? 'bg-accent' : 'bg-border'}`}
@@ -108,11 +111,6 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       captureBoundsRef.current = captureBounds
       const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, captureBounds.width))
       const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, captureBounds.height))
-      const pixelRate = clampedWidth * clampedHeight * TARGET_FRAME_RATE
-      const videoBitsPerSecond = Math.min(
-        MAX_VIDEO_BITRATE,
-        Math.max(MIN_VIDEO_BITRATE, Math.round(pixelRate * VIDEO_BITS_PER_PIXEL_PER_FRAME))
-      )
 
       const displayStream = await navigator.mediaDevices.getUserMedia({
         audio: systemAudioEnabled
@@ -122,15 +120,25 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           mandatory: {
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: selectedSource.id,
-            minWidth: MIN_CAPTURE_WIDTH,
-            minHeight: MIN_CAPTURE_HEIGHT,
             maxWidth: clampedWidth,
             maxHeight: clampedHeight,
-            minFrameRate: 30,
             maxFrameRate: TARGET_FRAME_RATE
           }
         }
       })
+      const videoTrack = displayStream.getVideoTracks()[0]
+      if (!videoTrack) {
+        throw new Error('Unable to start recording: no video track was returned for the selected source.')
+      }
+      const trackSettings = videoTrack.getSettings()
+      const resolvedWidth = Math.max(1, Math.round(trackSettings?.width ?? clampedWidth))
+      const resolvedHeight = Math.max(1, Math.round(trackSettings?.height ?? clampedHeight))
+      const resolvedFrameRate = Math.max(1, Math.round(trackSettings?.frameRate ?? TARGET_FRAME_RATE))
+      const pixelRate = resolvedWidth * resolvedHeight * resolvedFrameRate
+      const videoBitsPerSecond = Math.min(
+        MAX_VIDEO_BITRATE,
+        Math.max(MIN_VIDEO_BITRATE, Math.round(pixelRate * VIDEO_BITS_PER_PIXEL_PER_FRAME))
+      )
 
       let combinedStream = displayStream
       micStreamRef.current = null
@@ -356,6 +364,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
               src={APP_LOGO_URL}
               alt="Focra logo"
               className="w-5 h-5 object-contain"
+              referrerPolicy="no-referrer"
               onError={() => setLogoLoadFailed(true)}
             />
           )}
@@ -378,7 +387,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
                 <Mic size={15} className="text-text-secondary" />
                 Microphone
               </div>
-              <ToggleSwitch enabled={micEnabled} onToggle={() => setMicEnabled(!micEnabled)} />
+              <ToggleSwitch
+                enabled={micEnabled}
+                label="Microphone"
+                onToggle={() => setMicEnabled(!micEnabled)}
+              />
             </div>
 
             <div className="flex items-center justify-between">
@@ -386,7 +399,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
                 <Volume2 size={15} className="text-text-secondary" />
                 System Audio
               </div>
-              <ToggleSwitch enabled={systemAudioEnabled} onToggle={() => setSystemAudioEnabled(!systemAudioEnabled)} />
+              <ToggleSwitch
+                enabled={systemAudioEnabled}
+                label="System Audio"
+                onToggle={() => setSystemAudioEnabled(!systemAudioEnabled)}
+              />
             </div>
           </div>
 
@@ -395,7 +412,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
             <div className="flex items-center justify-between">
               <span className="text-sm text-text-primary">Enable Auto-Zoom</span>
-              <ToggleSwitch enabled={autoZoomEnabled} onToggle={() => setAutoZoomEnabled(!autoZoomEnabled)} />
+              <ToggleSwitch
+                enabled={autoZoomEnabled}
+                label="Enable Auto-Zoom"
+                onToggle={() => setAutoZoomEnabled(!autoZoomEnabled)}
+              />
             </div>
 
             {autoZoomEnabled && (
