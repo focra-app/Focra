@@ -28,6 +28,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Sync package version with release tag
+        run: npm --no-git-tag-version version "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}" --allow-same-version
+
       - name: Build & package (macOS)
         run: npm run dist
         env:
@@ -55,6 +58,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Sync package version with release tag
+        run: npm --no-git-tag-version version "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}" --allow-same-version
+
       - name: Build & package (Windows)
         run: npm run dist
         env:
@@ -81,6 +87,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Sync package version with release tag
+        run: npm --no-git-tag-version version "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}" --allow-same-version
 
       - name: Install Linux build dependencies
         run: |

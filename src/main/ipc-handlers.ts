@@ -24,7 +24,7 @@ let stableFrameCount = 0
 const STABLE_THRESHOLD_PX = 8   // pixels of movement to reset dwell counter
 const DWELL_FRAMES_REQUIRED = 5 // × 100 ms polling = 500 ms dwell → emit event
 
-function getCaptureBounds(sourceId: string, displayId?: string | null) {
+function getCaptureBounds(_sourceId: string, displayId?: string | null) {
   // Build a virtual desktop rectangle spanning all connected displays.
   const virtualBounds = screen.getAllDisplays().reduce(
     (acc, display) => {
@@ -55,19 +55,17 @@ function getCaptureBounds(sourceId: string, displayId?: string | null) {
         }
       : screen.getPrimaryDisplay().bounds
 
-  if (sourceId.startsWith('screen')) {
-    // desktopCapturer displayId is expected to be a numeric string matching Electron's display.id.
-    // NaN ensures invalid/missing IDs fail Number.isFinite and fall back safely to virtual bounds.
-    const numericDisplayId = displayId != null ? Number(displayId) : NaN
-    const sourceDisplay = Number.isFinite(numericDisplayId)
-      ? screen.getAllDisplays().find((display) => display.id === numericDisplayId)
-      : undefined
-    return sourceDisplay?.bounds ?? fallbackBounds
-  }
+  // desktopCapturer displayId is expected to be a numeric string matching Electron's display.id.
+  // NaN ensures invalid/missing IDs fail Number.isFinite and fall back safely to virtual bounds.
+  const numericDisplayId =
+    typeof displayId === 'string' && displayId.trim() !== '' ? Number(displayId) : NaN
+  const sourceDisplay = Number.isFinite(numericDisplayId)
+    ? screen.getAllDisplays().find((display) => display.id === numericDisplayId)
+    : undefined
+  if (sourceDisplay) return sourceDisplay.bounds
 
-  // Window-source bounds are not reliably available from desktopCapturer metadata.
-  // We still return a sane fallback for capture constraints, but auto-zoom tracking
-  // is only started for screen sources in the renderer.
+  // If the selected source can't be mapped to a specific display, use the virtual desktop
+  // as a safe fallback for both screen and window captures.
   return fallbackBounds
 }
 

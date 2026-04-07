@@ -107,7 +107,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     setError(null)
 
     try {
-      const autoZoomTrackingEnabled = autoZoomEnabled && selectedSource.id.startsWith('screen')
+      const autoZoomTrackingEnabled = autoZoomEnabled
       const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
       captureBoundsRef.current = captureBounds
       const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, captureBounds.width))
