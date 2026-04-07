@@ -107,8 +107,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     setError(null)
 
     try {
-      const autoZoomTrackingEnabled = autoZoomEnabled
-      const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
+      const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.displayId)
       captureBoundsRef.current = captureBounds
       const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, captureBounds.width))
       const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, captureBounds.height))
@@ -204,7 +203,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       // Start global mouse tracking in the main process so clicks in other
       // app windows (i.e. the recorded screen) are captured for auto-zoom.
-      if (autoZoomTrackingEnabled) {
+      if (autoZoomEnabled) {
         unsubscribeMouseClickRef.current?.()
         try {
           unsubscribeMouseClickRef.current = window.electronAPI.onMouseClick((data) => {

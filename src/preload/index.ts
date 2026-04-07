@@ -37,8 +37,8 @@ const api = {
     captureBounds: CaptureBounds
   ) => ipcRenderer.invoke('generate-zoom-keyframes', mouseEvents, videoDuration, captureBounds),
 
-  getSourceBounds: (sourceId: string, displayId?: string | null): Promise<CaptureBounds> =>
-    ipcRenderer.invoke('get-source-bounds', sourceId, displayId),
+  getSourceBounds: (displayId?: string | null): Promise<CaptureBounds> =>
+    ipcRenderer.invoke('get-source-bounds', displayId),
 
   startMouseTracking: (recordingStartTime: number, captureBounds: CaptureBounds): Promise<void> =>
     ipcRenderer.invoke('start-mouse-tracking', recordingStartTime, captureBounds),

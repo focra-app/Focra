@@ -24,7 +24,7 @@ let stableFrameCount = 0
 const STABLE_THRESHOLD_PX = 8   // pixels of movement to reset dwell counter
 const DWELL_FRAMES_REQUIRED = 5 // × 100 ms polling = 500 ms dwell → emit event
 
-function getCaptureBounds(_sourceId: string, displayId?: string | null) {
+function getCaptureBounds(displayId?: string | null) {
   // Build a virtual desktop rectangle spanning all connected displays.
   const virtualBounds = screen.getAllDisplays().reduce(
     (acc, display) => {
@@ -64,8 +64,8 @@ function getCaptureBounds(_sourceId: string, displayId?: string | null) {
     : undefined
   if (sourceDisplay) return sourceDisplay.bounds
 
-  // If the selected source can't be mapped to a specific display, use the virtual desktop
-  // as a safe fallback for both screen and window captures.
+  // Window-source bounds are not reliably available from desktopCapturer metadata.
+  // If the selected source can't be mapped to a specific display, use the virtual desktop fallback.
   return fallbackBounds
 }
 
@@ -120,8 +120,8 @@ export function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle('get-source-bounds', async (_event, sourceId: string, displayId?: string | null) => {
-    return getCaptureBounds(sourceId, displayId)
+  ipcMain.handle('get-source-bounds', async (_event, displayId?: string | null) => {
+    return getCaptureBounds(displayId)
   })
 
   // Poll the global cursor position so clicks in other app windows are captured.

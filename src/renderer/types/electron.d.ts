@@ -22,7 +22,7 @@ interface ElectronAPI {
     videoDuration: number,
     captureBounds: import('../types').CaptureBounds
   ) => Promise<ZoomKeyframe[]>
-  getSourceBounds: (sourceId: string, displayId?: string | null) => Promise<import('../types').CaptureBounds>
+  getSourceBounds: (displayId?: string | null) => Promise<import('../types').CaptureBounds>
   /** Starts global cursor-position polling in the main process for auto-zoom tracking. */
   startMouseTracking: (recordingStartTime: number, captureBounds: import('../types').CaptureBounds) => Promise<void>
   stopMouseTracking: () => Promise<void>
