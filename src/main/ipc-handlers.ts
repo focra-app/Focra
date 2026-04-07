@@ -56,9 +56,9 @@ function getCaptureBounds(sourceId: string, displayId?: string | null) {
       : screen.getPrimaryDisplay().bounds
 
   if (sourceId.startsWith('screen')) {
-    const parsedDisplayId = displayId != null ? Number(displayId) : NaN
-    const sourceDisplay = Number.isFinite(parsedDisplayId)
-      ? screen.getAllDisplays().find((display) => display.id === parsedDisplayId)
+    const numericDisplayId = displayId != null ? Number(displayId) : NaN
+    const sourceDisplay = Number.isFinite(numericDisplayId)
+      ? screen.getAllDisplays().find((display) => display.id === numericDisplayId)
       : undefined
     return sourceDisplay?.bounds ?? fallbackBounds
   }

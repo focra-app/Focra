@@ -21,6 +21,11 @@ const MIN_VIDEO_BITRATE = 8_000_000
 const MAX_VIDEO_BITRATE = 45_000_000
 const VIDEO_BITS_PER_PIXEL_PER_FRAME = 0.1
 const AUDIO_BITRATE = 128_000
+const TOGGLE_WIDTH = 44
+const TOGGLE_HEIGHT = 24
+const TOGGLE_PADDING = 4
+const TOGGLE_KNOB_SIZE = 16
+const TOGGLE_TRAVEL = TOGGLE_WIDTH - TOGGLE_KNOB_SIZE - TOGGLE_PADDING * 2
 
 interface RecordPageProps {
   onRecordingComplete: (result: RecordingResult) => void
@@ -37,12 +42,19 @@ function ToggleSwitch({ enabled, onToggle }: ToggleSwitchProps) {
       type="button"
       aria-pressed={enabled}
       onClick={onToggle}
-      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors duration-200
+      className={`relative inline-flex flex-shrink-0 items-center rounded-full transition-colors duration-200
         ${enabled ? 'bg-accent' : 'bg-border'}`}
+      style={{ width: TOGGLE_WIDTH, height: TOGGLE_HEIGHT }}
     >
       <span
-        className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200
-          ${enabled ? 'translate-x-5' : 'translate-x-0'}`}
+        className="absolute rounded-full bg-white shadow transition-transform duration-200"
+        style={{
+          top: TOGGLE_PADDING,
+          left: TOGGLE_PADDING,
+          width: TOGGLE_KNOB_SIZE,
+          height: TOGGLE_KNOB_SIZE,
+          transform: `translateX(${enabled ? TOGGLE_TRAVEL : 0}px)`
+        }}
       />
     </button>
   )
