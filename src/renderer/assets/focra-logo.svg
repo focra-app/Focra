@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Focra logo">
+  <defs>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5EEAD4" />
+      <stop offset="100%" stop-color="#155E75" />
+    </linearGradient>
+  </defs>
+  <g transform="translate(128 82)">
+    <circle r="46" fill="none" stroke="url(#logoGradient)" stroke-width="14" stroke-linecap="round" stroke-dasharray="230 70" transform="rotate(-30)" />
+    <circle r="24" fill="#e5f7f6" />
+    <path d="M-8 -12 L14 0 L-8 12 Z" fill="#1f8ea5" />
+  </g>
+  <text x="128" y="168" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700" fill="#23272f" letter-spacing="4">focra</text>
+  <text x="128" y="195" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="16" fill="#23272f" letter-spacing="4">screen</text>
+  <text x="128" y="218" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="16" fill="#23272f" letter-spacing="4">studio</text>
+</svg>

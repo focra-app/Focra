@@ -4,6 +4,7 @@ import SourceSelector from '../components/recording/SourceSelector'
 import RecordingControls from '../components/recording/RecordingControls'
 import RecordingPreview from '../components/recording/RecordingPreview'
 import type { CaptureBounds, DesktopSource, RecordingResult, ZoomKeyframe } from '../types'
+import appLogo from '../assets/focra-logo.svg'
 
 interface MouseEventData {
   x: number
@@ -26,7 +27,6 @@ const TOGGLE_HEIGHT = 24
 const TOGGLE_EDGE_OFFSET = 4
 const TOGGLE_KNOB_SIZE = 16
 const TOGGLE_TRAVEL = TOGGLE_WIDTH - TOGGLE_KNOB_SIZE - TOGGLE_EDGE_OFFSET * 2
-const APP_LOGO_URL = 'https://github.com/user-attachments/assets/d63e04bd-75ca-40f3-8d59-7ba1a1cff262'
 
 interface RecordPageProps {
   onRecordingComplete: (result: RecordingResult) => void
@@ -362,10 +362,9 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             <div className="w-3 h-3 rounded-full bg-accent" />
           ) : (
             <img
-              src={APP_LOGO_URL}
+              src={appLogo}
               alt="Focra logo"
               className="w-5 h-5 object-contain"
-              referrerPolicy="no-referrer"
               onError={() => setLogoLoadFailed(true)}
             />
           )}
@@ -391,7 +390,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
               <ToggleSwitch
                 enabled={micEnabled}
                 label="Microphone"
-                onToggle={() => setMicEnabled(!micEnabled)}
+                onToggle={() => setMicEnabled((prev) => !prev)}
               />
             </div>
 
@@ -403,7 +402,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
               <ToggleSwitch
                 enabled={systemAudioEnabled}
                 label="System Audio"
-                onToggle={() => setSystemAudioEnabled(!systemAudioEnabled)}
+                onToggle={() => setSystemAudioEnabled((prev) => !prev)}
               />
             </div>
           </div>
@@ -416,7 +415,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
               <ToggleSwitch
                 enabled={autoZoomEnabled}
                 label="Enable Auto-Zoom"
-                onToggle={() => setAutoZoomEnabled(!autoZoomEnabled)}
+                onToggle={() => setAutoZoomEnabled((prev) => !prev)}
               />
             </div>
 
