@@ -56,6 +56,8 @@ function getCaptureBounds(sourceId: string, displayId?: string | null) {
       : screen.getPrimaryDisplay().bounds
 
   if (sourceId.startsWith('screen')) {
+    // desktopCapturer displayId is expected to be a numeric string matching Electron's display.id.
+    // NaN ensures invalid/missing IDs fail Number.isFinite and fall back safely to virtual bounds.
     const numericDisplayId = displayId != null ? Number(displayId) : NaN
     const sourceDisplay = Number.isFinite(numericDisplayId)
       ? screen.getAllDisplays().find((display) => display.id === numericDisplayId)

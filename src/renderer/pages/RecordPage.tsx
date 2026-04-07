@@ -23,9 +23,9 @@ const VIDEO_BITS_PER_PIXEL_PER_FRAME = 0.1
 const AUDIO_BITRATE = 128_000
 const TOGGLE_WIDTH = 44
 const TOGGLE_HEIGHT = 24
-const TOGGLE_PADDING = 4
+const TOGGLE_EDGE_OFFSET = 4
 const TOGGLE_KNOB_SIZE = 16
-const TOGGLE_TRAVEL = TOGGLE_WIDTH - TOGGLE_KNOB_SIZE - TOGGLE_PADDING * 2
+const TOGGLE_TRAVEL = TOGGLE_WIDTH - TOGGLE_KNOB_SIZE - TOGGLE_EDGE_OFFSET * 2
 
 interface RecordPageProps {
   onRecordingComplete: (result: RecordingResult) => void
@@ -49,8 +49,8 @@ function ToggleSwitch({ enabled, onToggle }: ToggleSwitchProps) {
       <span
         className="absolute rounded-full bg-white shadow transition-transform duration-200"
         style={{
-          top: TOGGLE_PADDING,
-          left: TOGGLE_PADDING,
+          top: TOGGLE_EDGE_OFFSET,
+          left: TOGGLE_EDGE_OFFSET,
           width: TOGGLE_KNOB_SIZE,
           height: TOGGLE_KNOB_SIZE,
           transform: `translateX(${enabled ? TOGGLE_TRAVEL : 0}px)`
