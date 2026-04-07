@@ -108,8 +108,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           mandatory: {
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: selectedSource.id,
-            minWidth: Math.min(clampedWidth, MIN_CAPTURE_WIDTH),
-            minHeight: Math.min(clampedHeight, MIN_CAPTURE_HEIGHT),
+            minWidth: MIN_CAPTURE_WIDTH,
+            minHeight: MIN_CAPTURE_HEIGHT,
             maxWidth: clampedWidth,
             maxHeight: clampedHeight,
             minFrameRate: 30,

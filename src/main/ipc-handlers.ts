@@ -25,6 +25,7 @@ const STABLE_THRESHOLD_PX = 8   // pixels of movement to reset dwell counter
 const DWELL_FRAMES_REQUIRED = 5 // × 100 ms polling = 500 ms dwell → emit event
 
 function getCaptureBounds(sourceId: string, displayId?: string | null) {
+  // Build a virtual desktop rectangle spanning all connected displays.
   const virtualBounds = screen.getAllDisplays().reduce(
     (acc, display) => {
       const left = display.bounds.x
@@ -55,7 +56,7 @@ function getCaptureBounds(sourceId: string, displayId?: string | null) {
       : screen.getPrimaryDisplay().bounds
 
   if (sourceId.startsWith('screen')) {
-    const parsedDisplayId = Number(displayId)
+    const parsedDisplayId = displayId != null ? Number(displayId) : NaN
     const sourceDisplay = Number.isFinite(parsedDisplayId)
       ? screen.getAllDisplays().find((display) => display.id === parsedDisplayId)
       : undefined
