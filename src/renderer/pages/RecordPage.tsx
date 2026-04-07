@@ -3,7 +3,8 @@ import { Mic, Volume2, Zap } from 'lucide-react'
 import SourceSelector from '../components/recording/SourceSelector'
 import RecordingControls from '../components/recording/RecordingControls'
 import RecordingPreview from '../components/recording/RecordingPreview'
-import type { DesktopSource, RecordingResult, ZoomKeyframe } from '../types'
+import type { CaptureBounds, DesktopSource, RecordingResult, ZoomKeyframe } from '../types'
+import appLogo from '../assets/focra-logo.svg'
 
 interface MouseEventData {
   x: number
@@ -12,8 +13,55 @@ interface MouseEventData {
   type: 'click' | 'move'
 }
 
+const TARGET_FRAME_RATE = 60
+const MIN_CAPTURE_WIDTH = 1280
+const MIN_CAPTURE_HEIGHT = 720
+const MAX_CAPTURE_WIDTH = 7680
+const MAX_CAPTURE_HEIGHT = 4320
+const MIN_VIDEO_BITRATE = 8_000_000
+const MAX_VIDEO_BITRATE = 45_000_000
+const VIDEO_BITS_PER_PIXEL_PER_FRAME = 0.1
+const AUDIO_BITRATE = 128_000
+const TOGGLE_WIDTH = 44
+const TOGGLE_HEIGHT = 24
+const TOGGLE_EDGE_OFFSET = 4
+const TOGGLE_KNOB_SIZE = 16
+const TOGGLE_TRAVEL = TOGGLE_WIDTH - TOGGLE_KNOB_SIZE - TOGGLE_EDGE_OFFSET * 2
+
 interface RecordPageProps {
   onRecordingComplete: (result: RecordingResult) => void
+}
+
+interface ToggleSwitchProps {
+  enabled: boolean
+  onToggle: () => void
+  label: string
+}
+
+function ToggleSwitch({ enabled, onToggle, label }: ToggleSwitchProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      aria-label={label}
+      onClick={onToggle}
+      className={`relative inline-flex flex-shrink-0 items-center rounded-full transition-colors duration-200
+        ${enabled ? 'bg-accent' : 'bg-border'}`}
+      style={{ width: TOGGLE_WIDTH, height: TOGGLE_HEIGHT }}
+    >
+      <span
+        className="absolute rounded-full bg-white shadow transition-transform duration-200"
+        style={{
+          top: TOGGLE_EDGE_OFFSET,
+          left: TOGGLE_EDGE_OFFSET,
+          width: TOGGLE_KNOB_SIZE,
+          height: TOGGLE_KNOB_SIZE,
+          transform: `translateX(${enabled ? TOGGLE_TRAVEL : 0}px)`
+        }}
+      />
+    </button>
+  )
 }
 
 export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
@@ -27,6 +75,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const [elapsedTime, setElapsedTime] = useState(0)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -44,6 +93,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   // Track active recording time, excluding any paused intervals
   const pausedDurationRef = useRef<number>(0)  // accumulated paused ms
   const pauseStartRef = useRef<number>(0)       // timestamp of current pause start
+  const captureBoundsRef = useRef<CaptureBounds | null>(null)
 
   // Clean up mouse tracking subscription on unmount
   useEffect(() => {
@@ -57,6 +107,12 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     setError(null)
 
     try {
+      const autoZoomTrackingEnabled = autoZoomEnabled && selectedSource.id.startsWith('screen')
+      const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
+      captureBoundsRef.current = captureBounds
+      const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, captureBounds.width))
+      const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, captureBounds.height))
+
       const displayStream = await navigator.mediaDevices.getUserMedia({
         audio: systemAudioEnabled
           ? { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id } }
@@ -65,12 +121,25 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           mandatory: {
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: selectedSource.id,
-            maxWidth: 1920,
-            maxHeight: 1080,
-            maxFrameRate: 60
+            maxWidth: clampedWidth,
+            maxHeight: clampedHeight,
+            maxFrameRate: TARGET_FRAME_RATE
           }
         }
       })
+      const videoTrack = displayStream.getVideoTracks()[0]
+      if (!videoTrack) {
+        throw new Error('Unable to start recording: no video track was returned for the selected source.')
+      }
+      const trackSettings = videoTrack.getSettings()
+      const resolvedWidth = Math.max(1, Math.round(trackSettings?.width ?? clampedWidth))
+      const resolvedHeight = Math.max(1, Math.round(trackSettings?.height ?? clampedHeight))
+      const resolvedFrameRate = Math.max(1, Math.round(trackSettings?.frameRate ?? TARGET_FRAME_RATE))
+      const pixelRate = resolvedWidth * resolvedHeight * resolvedFrameRate
+      const videoBitsPerSecond = Math.min(
+        MAX_VIDEO_BITRATE,
+        Math.max(MIN_VIDEO_BITRATE, Math.round(pixelRate * VIDEO_BITS_PER_PIXEL_PER_FRAME))
+      )
 
       let combinedStream = displayStream
       micStreamRef.current = null
@@ -115,7 +184,9 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         recorder = new MediaRecorder(combinedStream, {
           mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
             ? 'video/webm;codecs=vp9,opus'
-            : 'video/webm'
+            : 'video/webm',
+          videoBitsPerSecond,
+          audioBitsPerSecond: AUDIO_BITRATE
         })
 
         recorder.ondataavailable = (e) => {
@@ -133,7 +204,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       // Start global mouse tracking in the main process so clicks in other
       // app windows (i.e. the recorded screen) are captured for auto-zoom.
-      if (autoZoomEnabled) {
+      if (autoZoomTrackingEnabled) {
         unsubscribeMouseClickRef.current?.()
         try {
           unsubscribeMouseClickRef.current = window.electronAPI.onMouseClick((data) => {
@@ -144,7 +215,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
               mouseEventsRef.current.push({ ...data, timestamp: normalizedTimestamp, type: 'click' })
             }
           })
-          await window.electronAPI.startMouseTracking(recordingStartTime)
+          await window.electronAPI.startMouseTracking(recordingStartTime, captureBounds)
         } catch (mouseTrackingError) {
           // Mouse tracking failed — tear down the recorder and all acquired resources
           unsubscribeMouseClickRef.current?.()
@@ -197,6 +268,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     // Reset pause tracking so the next recording starts fresh
     pausedDurationRef.current = 0
     pauseStartRef.current = 0
+    captureBoundsRef.current = null
     cleanupAudio()
     setStream(null)
     setIsRecording(false)
@@ -226,12 +298,12 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       let zoomKeyframes: ZoomKeyframe[] = []
       if (autoZoomEnabled && mouseEventsRef.current.length > 0) {
         try {
-          const screenSize = await window.electronAPI.getScreenSize()
+          const captureBounds = captureBoundsRef.current
+          if (!captureBounds) throw new Error('Missing capture bounds for auto-zoom generation')
           const rawKfs = await window.electronAPI.generateZoomKeyframes(
             mouseEventsRef.current,
             duration,
-            screenSize.width,
-            screenSize.height
+            captureBounds
           )
           // Apply sensitivity: filter by spacing and clamp scale
           zoomKeyframes = rawKfs
@@ -286,7 +358,16 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       {/* Title bar */}
       <div className="drag-region h-10 flex items-center px-4 flex-shrink-0">
         <div className="no-drag flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-accent" />
+          {logoLoadFailed ? (
+            <div className="w-3 h-3 rounded-full bg-accent" />
+          ) : (
+            <img
+              src={appLogo}
+              alt="Focra logo"
+              className="w-5 h-5 object-contain"
+              onError={() => setLogoLoadFailed(true)}
+            />
+          )}
           <span className="text-sm font-semibold text-text-primary">Focra</span>
         </div>
       </div>
@@ -306,14 +387,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
                 <Mic size={15} className="text-text-secondary" />
                 Microphone
               </div>
-              <button
-                onClick={() => setMicEnabled(!micEnabled)}
-                className={`w-10 h-6 rounded-full transition-colors duration-200 relative
-                  ${micEnabled ? 'bg-accent' : 'bg-border'}`}
-              >
-                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
-                  ${micEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
+              <ToggleSwitch
+                enabled={micEnabled}
+                label="Microphone"
+                onToggle={() => setMicEnabled((prev) => !prev)}
+              />
             </div>
 
             <div className="flex items-center justify-between">
@@ -321,14 +399,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
                 <Volume2 size={15} className="text-text-secondary" />
                 System Audio
               </div>
-              <button
-                onClick={() => setSystemAudioEnabled(!systemAudioEnabled)}
-                className={`w-10 h-6 rounded-full transition-colors duration-200 relative
-                  ${systemAudioEnabled ? 'bg-accent' : 'bg-border'}`}
-              >
-                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
-                  ${systemAudioEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
+              <ToggleSwitch
+                enabled={systemAudioEnabled}
+                label="System Audio"
+                onToggle={() => setSystemAudioEnabled((prev) => !prev)}
+              />
             </div>
           </div>
 
@@ -337,14 +412,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
             <div className="flex items-center justify-between">
               <span className="text-sm text-text-primary">Enable Auto-Zoom</span>
-              <button
-                onClick={() => setAutoZoomEnabled(!autoZoomEnabled)}
-                className={`w-10 h-6 rounded-full transition-colors duration-200 relative
-                  ${autoZoomEnabled ? 'bg-accent' : 'bg-border'}`}
-              >
-                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
-                  ${autoZoomEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
+              <ToggleSwitch
+                enabled={autoZoomEnabled}
+                label="Enable Auto-Zoom"
+                onToggle={() => setAutoZoomEnabled((prev) => !prev)}
+              />
             </div>
 
             {autoZoomEnabled && (

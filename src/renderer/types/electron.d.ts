@@ -20,12 +20,11 @@ interface ElectronAPI {
   generateZoomKeyframes: (
     mouseEvents: Array<{ x: number; y: number; timestamp: number; type: 'click' | 'move' }>,
     videoDuration: number,
-    screenWidth: number,
-    screenHeight: number
+    captureBounds: import('../types').CaptureBounds
   ) => Promise<ZoomKeyframe[]>
-  getScreenSize: () => Promise<{ width: number; height: number }>
+  getSourceBounds: (sourceId: string, displayId?: string | null) => Promise<import('../types').CaptureBounds>
   /** Starts global cursor-position polling in the main process for auto-zoom tracking. */
-  startMouseTracking: (recordingStartTime: number) => Promise<void>
+  startMouseTracking: (recordingStartTime: number, captureBounds: import('../types').CaptureBounds) => Promise<void>
   stopMouseTracking: () => Promise<void>
   /** Subscribe to dwell events emitted by the main process during recording. Returns an unsubscribe fn. */
   onMouseClick: (callback: (data: MouseClickData) => void) => () => void

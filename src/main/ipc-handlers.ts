@@ -1,7 +1,7 @@
 import { ipcMain, dialog, BrowserWindow, screen } from 'electron'
 import { randomUUID } from 'crypto'
 import { getDesktopSources, generateAutoZoomKeyframes, saveVideoFile } from './recorder'
-import type { MouseEvent } from './recorder'
+import type { CaptureBounds, MouseEvent } from './recorder'
 
 // One-time tokens for secure file saving: token → { filePath, expiresAt }
 const TOKEN_TTL_MS = 5 * 60 * 1000 // 5 minutes
@@ -23,6 +23,53 @@ let lastStablePos = { x: 0, y: 0 }
 let stableFrameCount = 0
 const STABLE_THRESHOLD_PX = 8   // pixels of movement to reset dwell counter
 const DWELL_FRAMES_REQUIRED = 5 // × 100 ms polling = 500 ms dwell → emit event
+
+function getCaptureBounds(sourceId: string, displayId?: string | null) {
+  // Build a virtual desktop rectangle spanning all connected displays.
+  const virtualBounds = screen.getAllDisplays().reduce(
+    (acc, display) => {
+      const left = display.bounds.x
+      const top = display.bounds.y
+      const right = display.bounds.x + display.bounds.width
+      const bottom = display.bounds.y + display.bounds.height
+      return {
+        x: Math.min(acc.x, left),
+        y: Math.min(acc.y, top),
+        right: Math.max(acc.right, right),
+        bottom: Math.max(acc.bottom, bottom)
+      }
+    },
+    { x: Infinity, y: Infinity, right: -Infinity, bottom: -Infinity }
+  )
+
+  const fallbackBounds =
+    Number.isFinite(virtualBounds.x) &&
+    Number.isFinite(virtualBounds.y) &&
+    Number.isFinite(virtualBounds.right) &&
+    Number.isFinite(virtualBounds.bottom)
+      ? {
+          x: virtualBounds.x,
+          y: virtualBounds.y,
+          width: virtualBounds.right - virtualBounds.x,
+          height: virtualBounds.bottom - virtualBounds.y
+        }
+      : screen.getPrimaryDisplay().bounds
+
+  if (sourceId.startsWith('screen')) {
+    // desktopCapturer displayId is expected to be a numeric string matching Electron's display.id.
+    // NaN ensures invalid/missing IDs fail Number.isFinite and fall back safely to virtual bounds.
+    const numericDisplayId = displayId != null ? Number(displayId) : NaN
+    const sourceDisplay = Number.isFinite(numericDisplayId)
+      ? screen.getAllDisplays().find((display) => display.id === numericDisplayId)
+      : undefined
+    return sourceDisplay?.bounds ?? fallbackBounds
+  }
+
+  // Window-source bounds are not reliably available from desktopCapturer metadata.
+  // We still return a sane fallback for capture constraints, but auto-zoom tracking
+  // is only started for screen sources in the renderer.
+  return fallbackBounds
+}
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('get-sources', async () => {
@@ -70,28 +117,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'generate-zoom-keyframes',
-    async (
-      _event,
-      mouseEvents: MouseEvent[],
-      videoDuration: number,
-      screenWidth: number,
-      screenHeight: number
-    ) => {
-      return generateAutoZoomKeyframes(mouseEvents, videoDuration, screenWidth, screenHeight)
+    async (_event, mouseEvents: MouseEvent[], videoDuration: number, captureBounds: CaptureBounds) => {
+      return generateAutoZoomKeyframes(mouseEvents, videoDuration, captureBounds)
     }
   )
 
-  ipcMain.handle('get-screen-size', async () => {
-    const display = screen.getPrimaryDisplay()
-    return {
-      width: display.size.width,
-      height: display.size.height
-    }
+  ipcMain.handle('get-source-bounds', async (_event, sourceId: string, displayId?: string | null) => {
+    return getCaptureBounds(sourceId, displayId)
   })
 
   // Poll the global cursor position so clicks in other app windows are captured.
   // A "dwell event" (cursor stable for ≥500 ms) is treated as a zoom anchor point.
-  ipcMain.handle('start-mouse-tracking', (_event, recordingStartTime: number) => {
+  ipcMain.handle('start-mouse-tracking', (_event, recordingStartTime: number, captureBounds: CaptureBounds) => {
     if (mouseTrackingInterval) clearInterval(mouseTrackingInterval)
 
     const { sender } = _event
@@ -105,6 +142,18 @@ export function registerIpcHandlers(): void {
         return
       }
       const pos = screen.getCursorScreenPoint()
+      const inBounds =
+        pos.x >= captureBounds.x &&
+        pos.y >= captureBounds.y &&
+        pos.x < captureBounds.x + captureBounds.width &&
+        pos.y < captureBounds.y + captureBounds.height
+
+      if (!inBounds) {
+        stableFrameCount = 0
+        lastStablePos = pos
+        return
+      }
+
       const dist = Math.hypot(pos.x - lastStablePos.x, pos.y - lastStablePos.y)
       if (dist < STABLE_THRESHOLD_PX) {
         stableFrameCount++
