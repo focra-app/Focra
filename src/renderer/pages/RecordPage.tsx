@@ -16,6 +16,13 @@ interface RecordPageProps {
   onRecordingComplete: (result: RecordingResult) => void
 }
 
+interface CaptureBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const [selectedSource, setSelectedSource] = useState<DesktopSource | null>(null)
   const [micEnabled, setMicEnabled] = useState(true)
@@ -44,6 +51,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   // Track active recording time, excluding any paused intervals
   const pausedDurationRef = useRef<number>(0)  // accumulated paused ms
   const pauseStartRef = useRef<number>(0)       // timestamp of current pause start
+  const captureBoundsRef = useRef<CaptureBounds | null>(null)
 
   // Clean up mouse tracking subscription on unmount
   useEffect(() => {
@@ -107,8 +115,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       mouseEventsRef.current = []
       pausedDurationRef.current = 0
       pauseStartRef.current = 0
+      captureBoundsRef.current = null
       const recordingStartTime = Date.now()
       startTimeRef.current = recordingStartTime
+      const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
+      captureBoundsRef.current = captureBounds
 
       let recorder: MediaRecorder
       try {
@@ -144,7 +155,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
               mouseEventsRef.current.push({ ...data, timestamp: normalizedTimestamp, type: 'click' })
             }
           })
-          await window.electronAPI.startMouseTracking(recordingStartTime)
+          await window.electronAPI.startMouseTracking(recordingStartTime, captureBounds)
         } catch (mouseTrackingError) {
           // Mouse tracking failed — tear down the recorder and all acquired resources
           unsubscribeMouseClickRef.current?.()
@@ -197,6 +208,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     // Reset pause tracking so the next recording starts fresh
     pausedDurationRef.current = 0
     pauseStartRef.current = 0
+    captureBoundsRef.current = null
     cleanupAudio()
     setStream(null)
     setIsRecording(false)
@@ -226,12 +238,12 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       let zoomKeyframes: ZoomKeyframe[] = []
       if (autoZoomEnabled && mouseEventsRef.current.length > 0) {
         try {
-          const screenSize = await window.electronAPI.getScreenSize()
+          const captureBounds = captureBoundsRef.current
+          if (!captureBounds) throw new Error('Missing capture bounds for auto-zoom generation')
           const rawKfs = await window.electronAPI.generateZoomKeyframes(
             mouseEventsRef.current,
             duration,
-            screenSize.width,
-            screenSize.height
+            captureBounds
           )
           // Apply sensitivity: filter by spacing and clamp scale
           zoomKeyframes = rawKfs

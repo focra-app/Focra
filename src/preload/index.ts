@@ -5,6 +5,7 @@ export interface DesktopSource {
   name: string
   thumbnail: string
   appIconUrl: string | null
+  displayId?: string | null
 }
 
 export interface MouseEventData {
@@ -12,6 +13,13 @@ export interface MouseEventData {
   y: number
   timestamp: number
   type: 'click' | 'move'
+}
+
+export interface CaptureBounds {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 const api = {
@@ -26,15 +34,14 @@ const api = {
   generateZoomKeyframes: (
     mouseEvents: MouseEventData[],
     videoDuration: number,
-    screenWidth: number,
-    screenHeight: number
-  ) => ipcRenderer.invoke('generate-zoom-keyframes', mouseEvents, videoDuration, screenWidth, screenHeight),
+    captureBounds: CaptureBounds
+  ) => ipcRenderer.invoke('generate-zoom-keyframes', mouseEvents, videoDuration, captureBounds),
 
-  getScreenSize: (): Promise<{ width: number; height: number }> =>
-    ipcRenderer.invoke('get-screen-size'),
+  getSourceBounds: (sourceId: string, displayId?: string | null): Promise<CaptureBounds> =>
+    ipcRenderer.invoke('get-source-bounds', sourceId, displayId),
 
-  startMouseTracking: (recordingStartTime: number): Promise<void> =>
-    ipcRenderer.invoke('start-mouse-tracking', recordingStartTime),
+  startMouseTracking: (recordingStartTime: number, captureBounds: CaptureBounds): Promise<void> =>
+    ipcRenderer.invoke('start-mouse-tracking', recordingStartTime, captureBounds),
 
   stopMouseTracking: (): Promise<void> =>
     ipcRenderer.invoke('stop-mouse-tracking'),

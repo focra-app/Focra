@@ -70,6 +70,7 @@ export interface DesktopSource {
   name: string
   thumbnail: string
   appIconUrl: string | null
+  displayId?: string | null
 }
 
 export interface RecordingResult {
