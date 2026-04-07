@@ -12,6 +12,16 @@ interface MouseEventData {
   type: 'click' | 'move'
 }
 
+const TARGET_FRAME_RATE = 60
+const MIN_CAPTURE_WIDTH = 1280
+const MIN_CAPTURE_HEIGHT = 720
+const MAX_CAPTURE_WIDTH = 7680
+const MAX_CAPTURE_HEIGHT = 4320
+const MIN_VIDEO_BITRATE = 8_000_000
+const MAX_VIDEO_BITRATE = 45_000_000
+const VIDEO_BITS_PER_PIXEL_PER_FRAME = 0.1
+const AUDIO_BITRATE = 128_000
+
 interface RecordPageProps {
   onRecordingComplete: (result: RecordingResult) => void
 }
@@ -82,11 +92,13 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     try {
       const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
       captureBoundsRef.current = captureBounds
-      const targetWidth = Math.max(1280, Math.min(7680, captureBounds.width))
-      const targetHeight = Math.max(720, Math.min(4320, captureBounds.height))
-      const targetFrameRate = 60
-      const pixelRate = targetWidth * targetHeight * targetFrameRate
-      const videoBitsPerSecond = Math.min(45_000_000, Math.max(8_000_000, Math.round(pixelRate * 0.1)))
+      const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, captureBounds.width))
+      const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, captureBounds.height))
+      const pixelRate = clampedWidth * clampedHeight * TARGET_FRAME_RATE
+      const videoBitsPerSecond = Math.min(
+        MAX_VIDEO_BITRATE,
+        Math.max(MIN_VIDEO_BITRATE, Math.round(pixelRate * VIDEO_BITS_PER_PIXEL_PER_FRAME))
+      )
 
       const displayStream = await navigator.mediaDevices.getUserMedia({
         audio: systemAudioEnabled
@@ -96,12 +108,12 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           mandatory: {
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: selectedSource.id,
-            minWidth: Math.min(targetWidth, 1280),
-            minHeight: Math.min(targetHeight, 720),
-            maxWidth: targetWidth,
-            maxHeight: targetHeight,
+            minWidth: Math.min(clampedWidth, MIN_CAPTURE_WIDTH),
+            minHeight: Math.min(clampedHeight, MIN_CAPTURE_HEIGHT),
+            maxWidth: clampedWidth,
+            maxHeight: clampedHeight,
             minFrameRate: 30,
-            maxFrameRate: targetFrameRate
+            maxFrameRate: TARGET_FRAME_RATE
           }
         }
       })
@@ -151,7 +163,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             ? 'video/webm;codecs=vp9,opus'
             : 'video/webm',
           videoBitsPerSecond,
-          audioBitsPerSecond: 128_000
+          audioBitsPerSecond: AUDIO_BITRATE
         })
 
         recorder.ondataavailable = (e) => {
