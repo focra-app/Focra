@@ -60,7 +60,7 @@ export function generateAutoZoomKeyframes(
     const timeSeconds = click.timestamp / 1000
 
     if (timeSeconds > videoDuration) continue
-    if (click.x < boundsLeft || click.x > boundsRight || click.y < boundsTop || click.y > boundsBottom) continue
+    if (click.x < boundsLeft || click.x >= boundsRight || click.y < boundsTop || click.y >= boundsBottom) continue
 
     // Avoid overlapping keyframes
     const lastKf = keyframes[keyframes.length - 1]

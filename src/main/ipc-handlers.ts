@@ -65,6 +65,9 @@ function getCaptureBounds(sourceId: string, displayId?: string | null) {
     return sourceDisplay?.bounds ?? fallbackBounds
   }
 
+  // Window-source bounds are not reliably available from desktopCapturer metadata.
+  // We still return a sane fallback for capture constraints, but auto-zoom tracking
+  // is only started for screen sources in the renderer.
   return fallbackBounds
 }
 
@@ -142,8 +145,8 @@ export function registerIpcHandlers(): void {
       const inBounds =
         pos.x >= captureBounds.x &&
         pos.y >= captureBounds.y &&
-        pos.x <= captureBounds.x + captureBounds.width &&
-        pos.y <= captureBounds.y + captureBounds.height
+        pos.x < captureBounds.x + captureBounds.width &&
+        pos.y < captureBounds.y + captureBounds.height
 
       if (!inBounds) {
         stableFrameCount = 0
