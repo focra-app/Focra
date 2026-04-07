@@ -72,6 +72,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const [elapsedTime, setElapsedTime] = useState(0)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -348,7 +349,16 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       {/* Title bar */}
       <div className="drag-region h-10 flex items-center px-4 flex-shrink-0">
         <div className="no-drag flex items-center gap-2">
-          <img src={APP_LOGO_URL} alt="Focra logo" className="w-5 h-5 object-contain" />
+          {logoLoadFailed ? (
+            <div className="w-3 h-3 rounded-full bg-accent" />
+          ) : (
+            <img
+              src={APP_LOGO_URL}
+              alt="Focra logo"
+              className="w-5 h-5 object-contain"
+              onError={() => setLogoLoadFailed(true)}
+            />
+          )}
           <span className="text-sm font-semibold text-text-primary">Focra</span>
         </div>
       </div>
