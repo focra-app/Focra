@@ -4,7 +4,7 @@
 
 **The free, open-source screen recorder that makes your recordings look intentional.**
 
-A cross-platform alternative to Screen Studio — with auto-zoom, annotations, background customization, and export — for free.
+A cross-platform alternative to Screen Studio  with auto-zoom, annotations, background customization, and export for free.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/iamtatenda/Focra/releases)
@@ -21,7 +21,7 @@ A cross-platform alternative to Screen Studio — with auto-zoom, annotations, b
 
 ## What is Focra?
 
-Focra is a **free and open-source screen recording application** built with Electron and React. It automatically generates smooth zoom animations based on where your cursor dwells, adds professional polish to tutorial videos, product demos, and developer walkthroughs — without any manual keyframing.
+Focra is a **free and open-source screen recording application** built with Electron and React. It automatically generates smooth zoom animations based on where your cursor dwells, adds professional polish to tutorial videos, product demos, and developer walkthroughs without any manual keyframing.
 
 > Think Screen Studio, but free, open-source, and cross-platform.
 
