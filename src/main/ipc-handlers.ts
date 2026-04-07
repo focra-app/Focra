@@ -109,9 +109,12 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('generate-zoom-keyframes', async (_event, mouseEvents: MouseEvent[], videoDuration: number, captureBounds: CaptureBounds) => {
-    return generateAutoZoomKeyframes(mouseEvents, videoDuration, captureBounds)
-  })
+  ipcMain.handle(
+    'generate-zoom-keyframes',
+    async (_event, mouseEvents: MouseEvent[], videoDuration: number, captureBounds: CaptureBounds) => {
+      return generateAutoZoomKeyframes(mouseEvents, videoDuration, captureBounds)
+    }
+  )
 
   ipcMain.handle('get-source-bounds', async (_event, sourceId: string, displayId?: string | null) => {
     return getCaptureBounds(sourceId, displayId)

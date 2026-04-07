@@ -3,7 +3,7 @@ import { Mic, Volume2, Zap } from 'lucide-react'
 import SourceSelector from '../components/recording/SourceSelector'
 import RecordingControls from '../components/recording/RecordingControls'
 import RecordingPreview from '../components/recording/RecordingPreview'
-import type { DesktopSource, RecordingResult, ZoomKeyframe } from '../types'
+import type { CaptureBounds, DesktopSource, RecordingResult, ZoomKeyframe } from '../types'
 
 interface MouseEventData {
   x: number
@@ -14,13 +14,6 @@ interface MouseEventData {
 
 interface RecordPageProps {
   onRecordingComplete: (result: RecordingResult) => void
-}
-
-interface CaptureBounds {
-  x: number
-  y: number
-  width: number
-  height: number
 }
 
 export default function RecordPage({ onRecordingComplete }: RecordPageProps) {

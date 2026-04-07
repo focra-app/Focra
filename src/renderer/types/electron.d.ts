@@ -11,13 +11,6 @@ interface MouseClickData {
   timestamp: number
 }
 
-interface CaptureBounds {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
 interface ElectronAPI {
   getSources: () => Promise<import('../types').DesktopSource[]>
   /** Returns a one-time save token (not a raw file path) for use with saveFile. */
@@ -27,11 +20,11 @@ interface ElectronAPI {
   generateZoomKeyframes: (
     mouseEvents: Array<{ x: number; y: number; timestamp: number; type: 'click' | 'move' }>,
     videoDuration: number,
-    captureBounds: CaptureBounds
+    captureBounds: import('../types').CaptureBounds
   ) => Promise<ZoomKeyframe[]>
-  getSourceBounds: (sourceId: string, displayId?: string | null) => Promise<CaptureBounds>
+  getSourceBounds: (sourceId: string, displayId?: string | null) => Promise<import('../types').CaptureBounds>
   /** Starts global cursor-position polling in the main process for auto-zoom tracking. */
-  startMouseTracking: (recordingStartTime: number, captureBounds: CaptureBounds) => Promise<void>
+  startMouseTracking: (recordingStartTime: number, captureBounds: import('../types').CaptureBounds) => Promise<void>
   stopMouseTracking: () => Promise<void>
   /** Subscribe to dwell events emitted by the main process during recording. Returns an unsubscribe fn. */
   onMouseClick: (callback: (data: MouseClickData) => void) => () => void
