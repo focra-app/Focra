@@ -26,6 +26,7 @@ const TOGGLE_HEIGHT = 24
 const TOGGLE_EDGE_OFFSET = 4
 const TOGGLE_KNOB_SIZE = 16
 const TOGGLE_TRAVEL = TOGGLE_WIDTH - TOGGLE_KNOB_SIZE - TOGGLE_EDGE_OFFSET * 2
+const APP_LOGO_URL = 'https://github.com/user-attachments/assets/d63e04bd-75ca-40f3-8d59-7ba1a1cff262'
 
 interface RecordPageProps {
   onRecordingComplete: (result: RecordingResult) => void
@@ -347,7 +348,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       {/* Title bar */}
       <div className="drag-region h-10 flex items-center px-4 flex-shrink-0">
         <div className="no-drag flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-accent" />
+          <img src={APP_LOGO_URL} alt="Focra logo" className="w-5 h-5 object-contain" />
           <span className="text-sm font-semibold text-text-primary">Focra</span>
         </div>
       </div>
