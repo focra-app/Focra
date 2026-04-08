@@ -65,10 +65,11 @@ function getZoomTransform(keyframes: ZoomKeyframe[], time: number) {
 export default function VideoPreview({ videoRef }: VideoPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animFrameRef = useRef<number>(0)
+  // Stores CSS-space dimensions for drawing coordinates; backing canvas stays in pixel space.
   const canvasMetricsRef = useRef({
     width: FALLBACK_CANVAS_DIMENSION,
     height: FALLBACK_CANVAS_DIMENSION,
-    dpr: 1
+    devicePixelRatio: 1
   })
   // Cache the last-loaded background image so we don't reload on every frame
   const bgImageRef = useRef<{ url: string; img: HTMLImageElement } | null>(null)
@@ -80,10 +81,10 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx || !project) return
 
-    const { width: W, height: H, dpr } = canvasMetricsRef.current
+    const { width: W, height: H, devicePixelRatio } = canvasMetricsRef.current
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
 
@@ -243,11 +244,11 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       const rect = currentCanvas.getBoundingClientRect()
       const cssWidth = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(rect.width))
       const cssHeight = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(rect.height))
-      const dpr = window.devicePixelRatio
-      const pixelWidth = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(cssWidth * dpr))
-      const pixelHeight = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(cssHeight * dpr))
+      const devicePixelRatio = window.devicePixelRatio
+      const pixelWidth = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(cssWidth * devicePixelRatio))
+      const pixelHeight = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(cssHeight * devicePixelRatio))
 
-      canvasMetricsRef.current = { width: cssWidth, height: cssHeight, dpr }
+      canvasMetricsRef.current = { width: cssWidth, height: cssHeight, devicePixelRatio }
       if (currentCanvas.width !== pixelWidth || currentCanvas.height !== pixelHeight) {
         currentCanvas.width = pixelWidth
         currentCanvas.height = pixelHeight
