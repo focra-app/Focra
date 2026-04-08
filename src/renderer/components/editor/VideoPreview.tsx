@@ -6,8 +6,7 @@ interface VideoPreviewProps {
   videoRef: React.RefObject<HTMLVideoElement>
 }
 
-const MIN_CANVAS_DIMENSION = 1
-const MIN_MOTION_BLUR_PX = 0
+const FALLBACK_CANVAS_DIMENSION = 1
 const MAX_MOTION_BLUR_PX = 1.5
 const MOTION_BLUR_SCALE_FACTOR = 1.2
 const MOTION_BLUR_SCALE_THRESHOLD = 1.1
@@ -78,8 +77,8 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
     const rect = canvas.getBoundingClientRect()
     const dpr = window.devicePixelRatio || 1
-    const targetWidth = Math.max(MIN_CANVAS_DIMENSION, Math.round(rect.width * dpr))
-    const targetHeight = Math.max(MIN_CANVAS_DIMENSION, Math.round(rect.height * dpr))
+    const targetWidth = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(rect.width * dpr))
+    const targetHeight = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(rect.height * dpr))
     if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
       canvas.width = targetWidth
       canvas.height = targetHeight
@@ -177,9 +176,9 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       if (motionBlur) {
         const blurPixels = Math.min(
           MAX_MOTION_BLUR_PX,
-          Math.max(MIN_MOTION_BLUR_PX, (scale - 1) * MOTION_BLUR_SCALE_FACTOR)
+          Math.max(0, (scale - 1) * MOTION_BLUR_SCALE_FACTOR)
         )
-        if (scale >= MOTION_BLUR_SCALE_THRESHOLD && blurPixels > 0) {
+        if (scale >= MOTION_BLUR_SCALE_THRESHOLD) {
           ctx.filter = `blur(${blurPixels.toFixed(2)}px)`
         }
       }
