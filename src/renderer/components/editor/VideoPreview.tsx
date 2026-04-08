@@ -6,6 +6,11 @@ interface VideoPreviewProps {
   videoRef: React.RefObject<HTMLVideoElement>
 }
 
+const MIN_CANVAS_DIMENSION = 1
+const MIN_MOTION_BLUR_PX = 0.5
+const MAX_MOTION_BLUR_PX = 1.5
+const MOTION_BLUR_SCALE_FACTOR = 1.2
+
 function cubicEase(t: number, easing: ZoomKeyframe['easing']): number {
   switch (easing) {
     case 'ease-in': return t * t * t
@@ -72,8 +77,8 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
     const rect = canvas.getBoundingClientRect()
     const dpr = window.devicePixelRatio || 1
-    const targetWidth = Math.max(1, Math.round(rect.width * dpr))
-    const targetHeight = Math.max(1, Math.round(rect.height * dpr))
+    const targetWidth = Math.max(MIN_CANVAS_DIMENSION, Math.round(rect.width * dpr))
+    const targetHeight = Math.max(MIN_CANVAS_DIMENSION, Math.round(rect.height * dpr))
     if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
       canvas.width = targetWidth
       canvas.height = targetHeight
@@ -169,7 +174,10 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
       ctx.save()
       if (motionBlur) {
-        const blurPixels = Math.min(1.5, Math.max(0.5, (scale - 1) * 1.2))
+        const blurPixels = Math.min(
+          MAX_MOTION_BLUR_PX,
+          Math.max(MIN_MOTION_BLUR_PX, (scale - 1) * MOTION_BLUR_SCALE_FACTOR)
+        )
         ctx.filter = `blur(${blurPixels.toFixed(2)}px)`
       }
       ctx.translate(W / 2 + tx * dw, H / 2 + ty * dh)
