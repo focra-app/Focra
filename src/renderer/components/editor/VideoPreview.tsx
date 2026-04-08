@@ -7,9 +7,10 @@ interface VideoPreviewProps {
 }
 
 const MIN_CANVAS_DIMENSION = 1
-const MIN_MOTION_BLUR_PX = 0.5
+const MIN_MOTION_BLUR_PX = 0
 const MAX_MOTION_BLUR_PX = 1.5
 const MOTION_BLUR_SCALE_FACTOR = 1.2
+const MOTION_BLUR_SCALE_THRESHOLD = 1.1
 
 function cubicEase(t: number, easing: ZoomKeyframe['easing']): number {
   switch (easing) {
@@ -178,7 +179,9 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
           MAX_MOTION_BLUR_PX,
           Math.max(MIN_MOTION_BLUR_PX, (scale - 1) * MOTION_BLUR_SCALE_FACTOR)
         )
-        ctx.filter = `blur(${blurPixels.toFixed(2)}px)`
+        if (scale >= MOTION_BLUR_SCALE_THRESHOLD && blurPixels > 0) {
+          ctx.filter = `blur(${blurPixels.toFixed(2)}px)`
+        }
       }
       ctx.translate(W / 2 + tx * dw, H / 2 + ty * dh)
       ctx.scale(scale, scale)
