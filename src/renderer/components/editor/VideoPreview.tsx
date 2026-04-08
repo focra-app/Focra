@@ -9,7 +9,7 @@ interface VideoPreviewProps {
 const FALLBACK_CANVAS_DIMENSION = 1
 const MAX_MOTION_BLUR_PX = 1.5
 const MOTION_BLUR_SCALE_FACTOR = 1.2
-const MOTION_BLUR_SCALE_THRESHOLD = 1.1
+const MIN_VISIBLE_MOTION_BLUR_PX = 0.5
 
 function cubicEase(t: number, easing: ZoomKeyframe['easing']): number {
   switch (easing) {
@@ -76,7 +76,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     if (!canvas || !ctx || !project) return
 
     const rect = canvas.getBoundingClientRect()
-    const dpr = window.devicePixelRatio || 1
+    const dpr = window.devicePixelRatio
     const targetWidth = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(rect.width * dpr))
     const targetHeight = Math.max(FALLBACK_CANVAS_DIMENSION, Math.round(rect.height * dpr))
     if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
@@ -178,7 +178,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
           MAX_MOTION_BLUR_PX,
           Math.max(0, (scale - 1) * MOTION_BLUR_SCALE_FACTOR)
         )
-        if (scale >= MOTION_BLUR_SCALE_THRESHOLD) {
+        if (blurPixels >= MIN_VISIBLE_MOTION_BLUR_PX) {
           ctx.filter = `blur(${blurPixels.toFixed(2)}px)`
         }
       }
