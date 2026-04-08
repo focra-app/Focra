@@ -70,8 +70,19 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx || !project) return
 
+    const rect = canvas.getBoundingClientRect()
+    const dpr = window.devicePixelRatio || 1
+    const targetWidth = Math.max(1, Math.round(rect.width * dpr))
+    const targetHeight = Math.max(1, Math.round(rect.height * dpr))
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+      canvas.width = targetWidth
+      canvas.height = targetHeight
+    }
+
     const W = canvas.width
     const H = canvas.height
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
 
     // Use video.currentTime while playing for frame-accurate animation;
     // fall back to the store's currentTime when paused/seeking.
@@ -158,7 +169,8 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
       ctx.save()
       if (motionBlur) {
-        ctx.filter = `blur(${Math.round((scale - 1) * 3)}px)`
+        const blurPixels = Math.min(1.5, Math.max(0.5, (scale - 1) * 1.2))
+        ctx.filter = `blur(${blurPixels.toFixed(2)}px)`
       }
       ctx.translate(W / 2 + tx * dw, H / 2 + ty * dh)
       ctx.scale(scale, scale)
@@ -281,8 +293,6 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     <div className="relative w-full bg-black rounded-xl overflow-hidden border border-border">
       <canvas
         ref={canvasRef}
-        width={1280}
-        height={720}
         className="w-full aspect-video"
         onClick={isPlacementTool ? handleCanvasClick : undefined}
         style={{ cursor: isPlacementTool ? 'crosshair' : 'default' }}

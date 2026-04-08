@@ -29,7 +29,7 @@ export interface CaptureBounds {
 export async function getDesktopSources() {
   const sources = await desktopCapturer.getSources({
     types: ['window', 'screen'],
-    thumbnailSize: { width: 320, height: 180 }
+    thumbnailSize: { width: 960, height: 540 }
   })
 
   return sources.map((s) => ({
@@ -77,7 +77,7 @@ export function generateAutoZoomKeyframes(
       y: normalizedY,
       scale: 2.0,
       easing: 'ease-in-out',
-      motionBlur: true
+      motionBlur: false
     })
   }
 
