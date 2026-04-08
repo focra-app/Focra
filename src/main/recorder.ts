@@ -1,6 +1,9 @@
 import { desktopCapturer } from 'electron'
 import { writeFile } from 'fs/promises'
 
+const SOURCE_THUMBNAIL_WIDTH = 640
+const SOURCE_THUMBNAIL_HEIGHT = 360
+
 export interface MouseEvent {
   x: number
   y: number
@@ -29,7 +32,7 @@ export interface CaptureBounds {
 export async function getDesktopSources() {
   const sources = await desktopCapturer.getSources({
     types: ['window', 'screen'],
-    thumbnailSize: { width: 960, height: 540 }
+    thumbnailSize: { width: SOURCE_THUMBNAIL_WIDTH, height: SOURCE_THUMBNAIL_HEIGHT }
   })
 
   return sources.map((s) => ({
