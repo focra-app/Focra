@@ -239,7 +239,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
     const syncCanvasMetrics = () => {
       const currentCanvas = canvasRef.current
-      if (!currentCanvas) return
+      if (!currentCanvas) return false
 
       const rect = currentCanvas.getBoundingClientRect()
       const cssWidth = Math.max(FALLBACK_CANVAS_DIMENSION, rect.width)
@@ -247,12 +247,20 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       const devicePixelRatio = window.devicePixelRatio
       const pixelWidth = Math.max(FALLBACK_CANVAS_DIMENSION, Math.ceil(rect.width * devicePixelRatio))
       const pixelHeight = Math.max(FALLBACK_CANVAS_DIMENSION, Math.ceil(rect.height * devicePixelRatio))
+      const previousMetrics = canvasMetricsRef.current
+      const didMetricsChange =
+        previousMetrics.width !== cssWidth ||
+        previousMetrics.height !== cssHeight ||
+        previousMetrics.devicePixelRatio !== devicePixelRatio
 
       canvasMetricsRef.current = { width: cssWidth, height: cssHeight, devicePixelRatio }
-      if (currentCanvas.width !== pixelWidth || currentCanvas.height !== pixelHeight) {
+      const didPixelSizeChange = currentCanvas.width !== pixelWidth || currentCanvas.height !== pixelHeight
+      if (didPixelSizeChange) {
         currentCanvas.width = pixelWidth
         currentCanvas.height = pixelHeight
       }
+
+      return didMetricsChange || didPixelSizeChange
     }
 
     const startRenderLoop = () => {
@@ -273,20 +281,20 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
     const hasResizeObserver = typeof ResizeObserver !== 'undefined'
     let resizeObserver: ResizeObserver | null = null
-    const handleWindowResizeFallback = () => {
-      syncCanvasMetrics()
-      renderSingleFrame()
+    const handleWindowResize = () => {
+      if (syncCanvasMetrics()) {
+        renderSingleFrame()
+      }
     }
     if (hasResizeObserver && canvas) {
       resizeObserver = new ResizeObserver(() => {
-        syncCanvasMetrics()
-        renderSingleFrame()
+        if (syncCanvasMetrics()) {
+          renderSingleFrame()
+        }
       })
       resizeObserver.observe(canvas)
     }
-    if (!hasResizeObserver) {
-      window.addEventListener('resize', handleWindowResizeFallback)
-    }
+    window.addEventListener('resize', handleWindowResize)
 
     // Render one frame immediately for initial state / when currentTime changes
     renderSingleFrame()
@@ -305,9 +313,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         video.removeEventListener('ended', renderSingleFrame)
         video.removeEventListener('seeked', renderSingleFrame)
       }
-      if (!hasResizeObserver) {
-        window.removeEventListener('resize', handleWindowResizeFallback)
-      }
+      window.removeEventListener('resize', handleWindowResize)
       resizeObserver?.disconnect()
       if (animFrameRef.current !== 0) {
         cancelAnimationFrame(animFrameRef.current)
