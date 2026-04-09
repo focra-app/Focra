@@ -247,7 +247,11 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       const devicePixelRatio = window.devicePixelRatio
       const pixelWidth = Math.max(FALLBACK_CANVAS_DIMENSION, Math.ceil(rect.width * devicePixelRatio))
       const pixelHeight = Math.max(FALLBACK_CANVAS_DIMENSION, Math.ceil(rect.height * devicePixelRatio))
-      const previousMetrics = canvasMetricsRef.current
+      const previousMetrics = canvasMetricsRef.current ?? {
+        width: FALLBACK_CANVAS_DIMENSION,
+        height: FALLBACK_CANVAS_DIMENSION,
+        devicePixelRatio: 1
+      }
       const didMetricsChange =
         previousMetrics.width !== cssWidth ||
         previousMetrics.height !== cssHeight ||
@@ -281,20 +285,18 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
     const hasResizeObserver = typeof ResizeObserver !== 'undefined'
     let resizeObserver: ResizeObserver | null = null
-    const handleWindowResize = () => {
+    const handleCanvasResize = () => {
       if (syncCanvasMetrics()) {
         renderSingleFrame()
       }
     }
     if (hasResizeObserver && canvas) {
       resizeObserver = new ResizeObserver(() => {
-        if (syncCanvasMetrics()) {
-          renderSingleFrame()
-        }
+        handleCanvasResize()
       })
       resizeObserver.observe(canvas)
     }
-    window.addEventListener('resize', handleWindowResize)
+    window.addEventListener('resize', handleCanvasResize)
 
     // Render one frame immediately for initial state / when currentTime changes
     renderSingleFrame()
@@ -313,7 +315,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         video.removeEventListener('ended', renderSingleFrame)
         video.removeEventListener('seeked', renderSingleFrame)
       }
-      window.removeEventListener('resize', handleWindowResize)
+      window.removeEventListener('resize', handleCanvasResize)
       resizeObserver?.disconnect()
       if (animFrameRef.current !== 0) {
         cancelAnimationFrame(animFrameRef.current)
