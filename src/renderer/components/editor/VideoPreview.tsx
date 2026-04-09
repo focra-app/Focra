@@ -271,7 +271,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
     syncCanvasMetrics()
 
-    const hasResizeObserver = Boolean(canvas && typeof ResizeObserver !== 'undefined')
+    const hasResizeObserver = typeof ResizeObserver !== 'undefined'
     let resizeObserver: ResizeObserver | null = null
     const handleWindowResizeFallback = () => {
       if (!hasResizeObserver) {
