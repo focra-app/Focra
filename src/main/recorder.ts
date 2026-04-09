@@ -6,10 +6,10 @@ const BASE_SOURCE_THUMBNAIL_HEIGHT = 180
 const MAX_SOURCE_THUMBNAIL_SCALE_FACTOR = 2
 
 function getSourceThumbnailSize() {
-  const maxDisplayScaleFactor = screen.getAllDisplays().reduce((maxScale, display) => {
+  const maxScaleFactor = screen.getAllDisplays().reduce((maxScale, display) => {
     return Math.max(maxScale, display.scaleFactor || 1)
   }, 1)
-  const thumbnailScaleFactor = Math.min(MAX_SOURCE_THUMBNAIL_SCALE_FACTOR, Math.max(1, maxDisplayScaleFactor))
+  const thumbnailScaleFactor = Math.min(MAX_SOURCE_THUMBNAIL_SCALE_FACTOR, Math.max(1, maxScaleFactor))
 
   return {
     width: Math.round(BASE_SOURCE_THUMBNAIL_WIDTH * thumbnailScaleFactor),
