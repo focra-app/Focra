@@ -247,11 +247,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       const devicePixelRatio = window.devicePixelRatio
       const pixelWidth = Math.max(FALLBACK_CANVAS_DIMENSION, Math.ceil(rect.width * devicePixelRatio))
       const pixelHeight = Math.max(FALLBACK_CANVAS_DIMENSION, Math.ceil(rect.height * devicePixelRatio))
-      const previousMetrics = canvasMetricsRef.current ?? {
-        width: FALLBACK_CANVAS_DIMENSION,
-        height: FALLBACK_CANVAS_DIMENSION,
-        devicePixelRatio: 1
-      }
+      const previousMetrics = canvasMetricsRef.current
       const didCssMetricsChange =
         previousMetrics.width !== cssWidth ||
         previousMetrics.height !== cssHeight ||
