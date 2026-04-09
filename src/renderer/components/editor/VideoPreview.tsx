@@ -272,6 +272,12 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     syncCanvasMetrics()
 
     let resizeObserver: ResizeObserver | null = null
+    const handleWindowResize = () => {
+      syncCanvasMetrics()
+      if (!resizeObserver) {
+        renderSingleFrame()
+      }
+    }
     if (canvas && typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver(() => {
         syncCanvasMetrics()
@@ -279,7 +285,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       })
       resizeObserver.observe(canvas)
     }
-    window.addEventListener('resize', syncCanvasMetrics)
+    window.addEventListener('resize', handleWindowResize)
 
     // Render one frame immediately for initial state / when currentTime changes
     renderSingleFrame()
@@ -298,7 +304,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         video.removeEventListener('ended', renderSingleFrame)
         video.removeEventListener('seeked', renderSingleFrame)
       }
-      window.removeEventListener('resize', syncCanvasMetrics)
+      window.removeEventListener('resize', handleWindowResize)
       resizeObserver?.disconnect()
       if (animFrameRef.current !== 0) {
         cancelAnimationFrame(animFrameRef.current)
