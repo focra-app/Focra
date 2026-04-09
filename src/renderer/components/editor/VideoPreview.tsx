@@ -252,7 +252,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         height: FALLBACK_CANVAS_DIMENSION,
         devicePixelRatio: 1
       }
-      const didMetricsChange =
+      const didCssMetricsChange =
         previousMetrics.width !== cssWidth ||
         previousMetrics.height !== cssHeight ||
         previousMetrics.devicePixelRatio !== devicePixelRatio
@@ -264,7 +264,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         currentCanvas.height = pixelHeight
       }
 
-      return didMetricsChange || didPixelSizeChange
+      return didCssMetricsChange || didPixelSizeChange
     }
 
     const startRenderLoop = () => {
