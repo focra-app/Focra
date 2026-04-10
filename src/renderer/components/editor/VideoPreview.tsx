@@ -82,9 +82,11 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     if (!canvas || !ctx || !project) return
 
     const { width: W, height: H, devicePixelRatio } = canvasMetricsRef.current
+    const scaleX = W > 0 ? canvas.width / W : devicePixelRatio
+    const scaleY = H > 0 ? canvas.height / H : devicePixelRatio
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0)
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality = 'high'
 
