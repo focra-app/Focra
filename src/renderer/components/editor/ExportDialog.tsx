@@ -51,6 +51,7 @@ const MIN_VISIBLE_MOTION_BLUR_PX = 0.5
 const MIN_EXPORT_BITRATE = 3_000_000
 const MAX_EXPORT_BITRATE = 35_000_000
 const EXPORT_BITS_PER_PIXEL_PER_FRAME = 0.08
+const PREVIEW_PADDING_PX = 40
 
 function AspectRatioIcon({ ratio }: { ratio: string }) {
   const dims: Record<string, { w: number; h: number }> = {
@@ -142,8 +143,14 @@ function getSupportedMimeType(option: ExportFormatOption): string | null {
   return option.mimeTypes.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null
 }
 
-function waitForVideoEvent(video: HTMLVideoElement, eventName: 'loadedmetadata' | 'seeked'): Promise<void> {
+function waitForVideoEvent(
+  video: HTMLVideoElement,
+  eventName: 'loadedmetadata' | 'loadeddata' | 'canplay' | 'seeked'
+): Promise<void> {
   if (eventName === 'loadedmetadata' && video.readyState >= 1) {
+    return Promise.resolve()
+  }
+  if ((eventName === 'loadeddata' || eventName === 'canplay') && video.readyState >= 2) {
     return Promise.resolve()
   }
   return new Promise((resolve) => {
@@ -155,11 +162,26 @@ function waitForVideoEvent(video: HTMLVideoElement, eventName: 'loadedmetadata' 
   })
 }
 
+async function ensureVideoReadyForFrame(video: HTMLVideoElement) {
+  if (video.readyState >= 2) return
+  await Promise.race([waitForVideoEvent(video, 'loadeddata'), waitForVideoEvent(video, 'canplay')])
+}
+
 async function seekTo(video: HTMLVideoElement, time: number) {
-  if (Math.abs(video.currentTime - time) < 0.001) return
+  if (Math.abs(video.currentTime - time) < 0.001) {
+    await ensureVideoReadyForFrame(video)
+    return
+  }
   const seekedPromise = waitForVideoEvent(video, 'seeked')
   video.currentTime = time
   await seekedPromise
+  await ensureVideoReadyForFrame(video)
+}
+
+function waitUntil(targetTimeMs: number): Promise<void> {
+  const remaining = targetTimeMs - performance.now()
+  if (remaining <= 1) return Promise.resolve()
+  return new Promise((resolve) => setTimeout(resolve, remaining))
 }
 
 async function loadBackgroundImage(project: EditorProject): Promise<HTMLImageElement | null> {
@@ -246,7 +268,7 @@ function drawFrame(
   const srcW = crop ? crop.width * video.videoWidth : video.videoWidth
   const srcH = crop ? crop.height * video.videoHeight : video.videoHeight
 
-  const padding = Math.round(Math.min(W, H) * 0.045)
+  const padding = PREVIEW_PADDING_PX
   const availW = Math.max(1, W - padding * 2)
   const availH = Math.max(1, H - padding * 2)
   const ratio = srcW / srcH
@@ -317,7 +339,7 @@ function drawFrame(
   }
 }
 
-async function renderVideoWithEffects(project: EditorProject, settings: ExportSettings): Promise<Blob> {
+async function renderVideoWithEffects(project: EditorProject, settings: ExportSettings): Promise<ArrayBuffer> {
   const formatOption = getFormatOption(settings.format)
   const mimeType = getSupportedMimeType(formatOption)
   if (!mimeType) {
@@ -343,6 +365,15 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   await waitForVideoEvent(video, 'loadedmetadata')
   await seekTo(video, startTime)
 
+  const audioVideo = document.createElement('video')
+  audioVideo.src = project.videoUrl
+  audioVideo.preload = 'auto'
+  audioVideo.muted = false
+  audioVideo.volume = 0
+  audioVideo.playsInline = true
+  await waitForVideoEvent(audioVideo, 'loadedmetadata')
+  await seekTo(audioVideo, startTime)
+
   const bgImage = await loadBackgroundImage(project)
   drawFrame(ctx, project, video, startTime, width, height, bgImage)
 
@@ -353,9 +384,9 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     throw new Error('Unable to initialize export video track')
   }
 
-  if (typeof video.captureStream === 'function') {
+  if (typeof audioVideo.captureStream === 'function') {
     try {
-      const audioStream = video.captureStream()
+      const audioStream = audioVideo.captureStream()
       for (const track of audioStream.getAudioTracks()) {
         canvasStream.addTrack(track)
       }
@@ -375,43 +406,70 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     videoBitsPerSecond
   })
 
-  const chunks: Blob[] = []
-  const exportBlobPromise = new Promise<Blob>((resolve, reject) => {
+  const chunkPromises: Array<Promise<Uint8Array>> = []
+  const exportBufferPromise = new Promise<ArrayBuffer>((resolve, reject) => {
     recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data)
+      if (event.data.size > 0) {
+        chunkPromises.push(event.data.arrayBuffer().then((buffer) => new Uint8Array(buffer)))
+      }
     }
 
     recorder.onerror = () => {
       reject(new Error('Export recording failed'))
     }
 
-    recorder.onstop = () => {
+    recorder.onstop = async () => {
       canvasStream.getTracks().forEach((track) => track.stop())
-      resolve(new Blob(chunks, { type: mimeType }))
+      try {
+        const chunks = await Promise.all(chunkPromises)
+        const totalSize = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+        const merged = new Uint8Array(totalSize)
+        let offset = 0
+        for (const chunk of chunks) {
+          merged.set(chunk, offset)
+          offset += chunk.byteLength
+        }
+        resolve(merged.buffer)
+      } catch {
+        reject(new Error('Export recording failed'))
+      }
     }
   })
 
-  recorder.start()
+  recorder.start(1000)
 
   try {
     const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
+    let audioPlaying = false
+    try {
+      await audioVideo.play()
+      audioPlaying = true
+    } catch {
+      audioPlaying = false
+    }
+    const exportStartWallClock = performance.now()
 
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
+      await waitUntil(exportStartWallClock + (frameIndex * 1000) / settings.fps)
       const renderTime = Math.min(endTime, startTime + frameIndex / settings.fps)
       await seekTo(video, renderTime)
       drawFrame(ctx, project, video, renderTime, width, height, bgImage)
       videoTrack.requestFrame()
     }
+    if (audioPlaying) {
+      await waitUntil(exportStartWallClock + (totalFrames * 1000) / settings.fps)
+    }
   } catch (err) {
     canvasStream.getTracks().forEach((track) => track.stop())
     throw err
   } finally {
+    audioVideo.pause()
     if (recorder.state !== 'inactive') {
       recorder.stop()
     }
   }
 
-  return exportBlobPromise
+  return exportBufferPromise
 }
 
 export default function ExportDialog({ onClose }: ExportDialogProps) {
@@ -458,10 +516,8 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         return
       }
 
-      const exportedBlob = await renderVideoWithEffects(project, { ...settings, format: filteredOption.value })
-
-      const buffer = await exportedBlob.arrayBuffer()
-      const saveResult = await window.electronAPI.saveFile(result.saveToken, buffer)
+      const exportedBuffer = await renderVideoWithEffects(project, { ...settings, format: filteredOption.value })
+      const saveResult = await window.electronAPI.saveFile(result.saveToken, exportedBuffer)
       if (!saveResult.success) {
         throw new Error(saveResult.error ?? 'Failed to save exported file')
       }

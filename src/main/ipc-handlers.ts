@@ -91,24 +91,24 @@ export function registerIpcHandlers(): void {
         ? { defaultName: optionsInput }
         : optionsInput
       const defaultName = optionsArg.defaultName
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-    const options: Electron.SaveDialogOptions = {
-      defaultPath: defaultName,
-      filters: optionsArg.filters ?? [
-        { name: 'WebM Video', extensions: ['webm'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
-    }
-    const result = win
-      ? await dialog.showSaveDialog(win, options)
-      : await dialog.showSaveDialog(options)
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      const options: Electron.SaveDialogOptions = {
+        defaultPath: defaultName,
+        filters: optionsArg.filters ?? [
+          { name: 'WebM Video', extensions: ['webm'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      }
+      const result = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options)
 
-    if (!result.canceled && result.filePath) {
-      const token = randomUUID()
-      pendingSavePaths.set(token, { filePath: result.filePath, expiresAt: Date.now() + TOKEN_TTL_MS })
-      return { canceled: false, saveToken: token }
-    }
-    return { canceled: true, saveToken: null }
+      if (!result.canceled && result.filePath) {
+        const token = randomUUID()
+        pendingSavePaths.set(token, { filePath: result.filePath, expiresAt: Date.now() + TOKEN_TTL_MS })
+        return { canceled: false, saveToken: token }
+      }
+      return { canceled: true, saveToken: null }
     }
   )
 
