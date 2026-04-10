@@ -450,7 +450,6 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       audioPlaying = true
     } catch (err) {
       console.warn('Export audio playback could not start; continuing with best-effort audio capture', err)
-      audioPlaying = false
     }
     const exportStartWallClock = performance.now()
 
@@ -470,6 +469,8 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     throw err
   } finally {
     audioVideo.pause()
+    audioVideo.removeAttribute('src')
+    audioVideo.load()
     if (recorder.state !== 'inactive') {
       recorder.stop()
     }
