@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useEditorStore } from '../../store/useEditorStore'
 import type { ZoomKeyframe } from '../../types'
 
@@ -243,7 +243,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     }
   }, [renderFrame])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const video = videoRef.current
     const canvas = canvasRef.current
 
