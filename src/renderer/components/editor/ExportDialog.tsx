@@ -52,6 +52,8 @@ const MIN_EXPORT_BITRATE = 3_000_000
 const MAX_EXPORT_BITRATE = 35_000_000
 const EXPORT_BITS_PER_PIXEL_PER_FRAME = 0.08
 const PREVIEW_PADDING_PX = 40
+const MIN_WAIT_MS = 1
+const RECORDER_TIMESLICE_MS = 1000
 
 function AspectRatioIcon({ ratio }: { ratio: string }) {
   const dims: Record<string, { w: number; h: number }> = {
@@ -180,7 +182,7 @@ async function seekTo(video: HTMLVideoElement, time: number) {
 
 function waitUntil(targetTimeMs: number): Promise<void> {
   const remaining = targetTimeMs - performance.now()
-  if (remaining <= 1) return Promise.resolve()
+  if (remaining <= MIN_WAIT_MS) return Promise.resolve()
   return new Promise((resolve) => setTimeout(resolve, remaining))
 }
 
@@ -436,7 +438,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
   })
 
-  recorder.start(1000)
+  recorder.start(RECORDER_TIMESLICE_MS)
 
   try {
     const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
