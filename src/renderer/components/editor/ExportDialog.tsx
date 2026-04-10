@@ -347,7 +347,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   drawFrame(ctx, project, video, startTime, width, height, bgImage)
 
   const canvasStream = canvas.captureStream(0)
-  const canvasVideoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
+  const videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
 
   if (typeof video.captureStream === 'function') {
     try {
@@ -393,11 +393,11 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     const frameDuration = 1 / settings.fps
     const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
 
-    for (let frameIndex = 0; frameIndex <= totalFrames; frameIndex += 1) {
+    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       const renderTime = Math.min(endTime, startTime + frameIndex * frameDuration)
       await seekTo(video, renderTime)
       drawFrame(ctx, project, video, renderTime, width, height, bgImage)
-      canvasVideoTrack?.requestFrame()
+      videoTrack?.requestFrame()
     }
   } catch (err) {
     canvasStream.getTracks().forEach((track) => track.stop())
