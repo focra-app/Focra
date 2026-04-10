@@ -19,7 +19,7 @@ export default function ZoomEditor() {
       y: 0.5,
       scale: 2,
       easing: 'ease-in-out',
-      motionBlur: true
+      motionBlur: false
     })
   }
 

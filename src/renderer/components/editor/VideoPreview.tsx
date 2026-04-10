@@ -1,10 +1,15 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useEditorStore } from '../../store/useEditorStore'
 import type { ZoomKeyframe } from '../../types'
 
 interface VideoPreviewProps {
   videoRef: React.RefObject<HTMLVideoElement>
 }
+
+const FALLBACK_CANVAS_DIMENSION = 1
+const MAX_MOTION_BLUR_PX = 1.5
+const MOTION_BLUR_SCALE_FACTOR = 1.2
+const MIN_VISIBLE_MOTION_BLUR_PX = 0.5
 
 function cubicEase(t: number, easing: ZoomKeyframe['easing']): number {
   switch (easing) {
@@ -60,6 +65,13 @@ function getZoomTransform(keyframes: ZoomKeyframe[], time: number) {
 export default function VideoPreview({ videoRef }: VideoPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animFrameRef = useRef<number>(0)
+  const renderFrameRef = useRef<() => void>(() => {})
+  // Stores CSS-space dimensions for drawing coordinates; backing canvas stays in pixel space.
+  const canvasMetricsRef = useRef({
+    width: FALLBACK_CANVAS_DIMENSION,
+    height: FALLBACK_CANVAS_DIMENSION,
+    devicePixelRatio: 1
+  })
   // Cache the last-loaded background image so we don't reload on every frame
   const bgImageRef = useRef<{ url: string; img: HTMLImageElement } | null>(null)
   const { project, currentTime, selectedTool, addAnnotation } = useEditorStore()
@@ -70,8 +82,14 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx || !project) return
 
-    const W = canvas.width
-    const H = canvas.height
+    const { width: W, height: H } = canvasMetricsRef.current
+    const scaleX = canvas.width / W
+    const scaleY = canvas.height / H
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
 
     // Use video.currentTime while playing for frame-accurate animation;
     // fall back to the store's currentTime when paused/seeking.
@@ -102,7 +120,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       // Load/cache the background image; render it cover-fitted to the canvas
       if (bgImageRef.current?.url !== bg.imageUrl) {
         const img = new Image()
-        img.onload = () => renderFrame()
+        img.onload = () => renderFrameRef.current()
         img.src = bg.imageUrl
         bgImageRef.current = { url: bg.imageUrl, img }
       }
@@ -158,7 +176,13 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
       ctx.save()
       if (motionBlur) {
-        ctx.filter = `blur(${Math.round((scale - 1) * 3)}px)`
+        const blurPixels = Math.min(
+          MAX_MOTION_BLUR_PX,
+          Math.max(0, (scale - 1) * MOTION_BLUR_SCALE_FACTOR)
+        )
+        if (blurPixels >= MIN_VISIBLE_MOTION_BLUR_PX) {
+          ctx.filter = `blur(${blurPixels.toFixed(2)}px)`
+        }
       }
       ctx.translate(W / 2 + tx * dw, H / 2 + ty * dh)
       ctx.scale(scale, scale)
@@ -206,18 +230,52 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     }
 
     if (video && !video.paused && !video.ended) {
-      animFrameRef.current = requestAnimationFrame(renderFrame)
+      animFrameRef.current = requestAnimationFrame(renderFrameRef.current)
     } else {
       animFrameRef.current = 0
     }
   }, [project, currentTime, videoRef])
 
   useEffect(() => {
+    renderFrameRef.current = renderFrame
+    if (animFrameRef.current === 0) {
+      renderFrameRef.current()
+    }
+  }, [renderFrame])
+
+  useLayoutEffect(() => {
     const video = videoRef.current
+    const canvas = canvasRef.current
+
+    const syncCanvasMetrics = () => {
+      const currentCanvas = canvasRef.current
+      if (!currentCanvas) return false
+
+      const rect = currentCanvas.getBoundingClientRect()
+      const devicePixelRatio = window.devicePixelRatio
+      const baseCssWidth = Math.max(FALLBACK_CANVAS_DIMENSION, rect.width)
+      const baseCssHeight = Math.max(FALLBACK_CANVAS_DIMENSION, rect.height)
+      const pixelWidth = Math.ceil(baseCssWidth * devicePixelRatio)
+      const pixelHeight = Math.ceil(baseCssHeight * devicePixelRatio)
+      const previousMetrics = canvasMetricsRef.current
+      const didCssMetricsChange =
+        previousMetrics.width !== baseCssWidth ||
+        previousMetrics.height !== baseCssHeight ||
+        previousMetrics.devicePixelRatio !== devicePixelRatio
+
+      canvasMetricsRef.current = { width: baseCssWidth, height: baseCssHeight, devicePixelRatio }
+      const didPixelSizeChange = currentCanvas.width !== pixelWidth || currentCanvas.height !== pixelHeight
+      if (didPixelSizeChange) {
+        currentCanvas.width = pixelWidth
+        currentCanvas.height = pixelHeight
+      }
+
+      return didCssMetricsChange || didPixelSizeChange
+    }
 
     const startRenderLoop = () => {
       if (animFrameRef.current === 0) {
-        animFrameRef.current = requestAnimationFrame(renderFrame)
+        animFrameRef.current = requestAnimationFrame(renderFrameRef.current)
       }
     }
 
@@ -226,8 +284,25 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         cancelAnimationFrame(animFrameRef.current)
         animFrameRef.current = 0
       }
-      renderFrame()
+      renderFrameRef.current()
     }
+
+    syncCanvasMetrics()
+
+    const hasResizeObserver = typeof ResizeObserver !== 'undefined'
+    let resizeObserver: ResizeObserver | null = null
+    const handleCanvasResize = () => {
+      if (syncCanvasMetrics()) {
+        renderSingleFrame()
+      }
+    }
+    if (hasResizeObserver && canvas) {
+      resizeObserver = new ResizeObserver(() => {
+        handleCanvasResize()
+      })
+      resizeObserver.observe(canvas)
+    }
+    window.addEventListener('resize', handleCanvasResize)
 
     // Render one frame immediately for initial state / when currentTime changes
     renderSingleFrame()
@@ -246,12 +321,14 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         video.removeEventListener('ended', renderSingleFrame)
         video.removeEventListener('seeked', renderSingleFrame)
       }
+      window.removeEventListener('resize', handleCanvasResize)
+      resizeObserver?.disconnect()
       if (animFrameRef.current !== 0) {
         cancelAnimationFrame(animFrameRef.current)
         animFrameRef.current = 0
       }
     }
-  }, [renderFrame, videoRef])
+  }, [videoRef])
 
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!project) return
@@ -281,8 +358,6 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     <div className="relative w-full bg-black rounded-xl overflow-hidden border border-border">
       <canvas
         ref={canvasRef}
-        width={1280}
-        height={720}
         className="w-full aspect-video"
         onClick={isPlacementTool ? handleCanvasClick : undefined}
         style={{ cursor: isPlacementTool ? 'crosshair' : 'default' }}

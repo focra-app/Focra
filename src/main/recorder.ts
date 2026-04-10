@@ -1,5 +1,21 @@
-import { desktopCapturer } from 'electron'
+import { desktopCapturer, screen } from 'electron'
 import { writeFile } from 'fs/promises'
+
+const BASE_SOURCE_THUMBNAIL_WIDTH = 320
+const BASE_SOURCE_THUMBNAIL_HEIGHT = 180
+const MAX_SOURCE_THUMBNAIL_SCALE_FACTOR = 2
+
+function getSourceThumbnailSize() {
+  const maxScaleFactor = screen.getAllDisplays().reduce((maxScale, display) => {
+    return Math.max(maxScale, display.scaleFactor || 1)
+  }, 1)
+  const thumbnailScaleFactor = Math.min(MAX_SOURCE_THUMBNAIL_SCALE_FACTOR, Math.max(1, maxScaleFactor))
+
+  return {
+    width: Math.round(BASE_SOURCE_THUMBNAIL_WIDTH * thumbnailScaleFactor),
+    height: Math.round(BASE_SOURCE_THUMBNAIL_HEIGHT * thumbnailScaleFactor)
+  }
+}
 
 export interface MouseEvent {
   x: number
@@ -27,9 +43,10 @@ export interface CaptureBounds {
 }
 
 export async function getDesktopSources() {
+  const thumbnailSize = getSourceThumbnailSize()
   const sources = await desktopCapturer.getSources({
     types: ['window', 'screen'],
-    thumbnailSize: { width: 320, height: 180 }
+    thumbnailSize
   })
 
   return sources.map((s) => ({
@@ -77,7 +94,7 @@ export function generateAutoZoomKeyframes(
       y: normalizedY,
       scale: 2.0,
       easing: 'ease-in-out',
-      motionBlur: true
+      motionBlur: false
     })
   }
 
