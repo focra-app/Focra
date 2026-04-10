@@ -25,8 +25,13 @@ export interface CaptureBounds {
 const api = {
   getSources: (): Promise<DesktopSource[]> => ipcRenderer.invoke('get-sources'),
 
-  showSaveDialog: (defaultName: string): Promise<{ canceled: boolean; saveToken: string | null }> =>
-    ipcRenderer.invoke('show-save-dialog', defaultName),
+  showSaveDialog: (
+    options: {
+      defaultName: string
+      filters?: Array<{ name: string; extensions: string[] }>
+    }
+  ): Promise<{ canceled: boolean; saveToken: string | null }> =>
+    ipcRenderer.invoke('show-save-dialog', options),
 
   saveFile: (token: string, buffer: ArrayBuffer): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('save-file', token, buffer),

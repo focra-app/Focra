@@ -261,7 +261,7 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
 
       {/* Export Dialog */}
       {showExport && (
-        <ExportDialog onClose={() => setShowExport(false)} videoBlob={result.videoBlob} />
+        <ExportDialog onClose={() => setShowExport(false)} />
       )}
     </div>
   )

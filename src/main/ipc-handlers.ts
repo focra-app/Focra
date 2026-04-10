@@ -76,11 +76,25 @@ export function registerIpcHandlers(): void {
     return getDesktopSources()
   })
 
-  ipcMain.handle('show-save-dialog', async (_event, defaultName: string) => {
+  ipcMain.handle(
+    'show-save-dialog',
+    async (
+      _event,
+      optionsInput:
+        | string
+        | {
+            defaultName: string
+            filters?: Array<{ name: string; extensions: string[] }>
+          }
+    ) => {
+      const optionsArg = typeof optionsInput === 'string'
+        ? { defaultName: optionsInput }
+        : optionsInput
+      const defaultName = optionsArg.defaultName
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const options: Electron.SaveDialogOptions = {
       defaultPath: defaultName,
-      filters: [
+      filters: optionsArg.filters ?? [
         { name: 'WebM Video', extensions: ['webm'] },
         { name: 'All Files', extensions: ['*'] }
       ]
@@ -95,7 +109,8 @@ export function registerIpcHandlers(): void {
       return { canceled: false, saveToken: token }
     }
     return { canceled: true, saveToken: null }
-  })
+    }
+  )
 
   // Accepts a one-time token (from show-save-dialog) instead of a raw file path to
   // prevent an arbitrary file-write primitive if the renderer is ever compromised.

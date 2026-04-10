@@ -43,8 +43,8 @@ export interface Background {
 export interface ExportSettings {
   aspectRatio: '16:9' | '4:3' | '1:1' | '9:16'
   resolution: '720p' | '1080p' | '1440p' | '4k'
-  format: 'webm'
-  fps: 30 | 60
+  format: 'webm' | 'webm-vp9' | 'webm-vp8' | 'mp4'
+  fps: 24 | 30 | 60
 }
 
 export interface CropSettings {

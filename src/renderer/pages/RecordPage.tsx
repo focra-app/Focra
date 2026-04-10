@@ -305,14 +305,25 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             duration,
             captureBounds
           )
-          // Apply sensitivity: filter by spacing and clamp scale
+          const normalizedSensitivity = Math.max(0.1, Math.min(1, autoZoomSensitivity))
+          // Lower sensitivity = fewer keyframes by requiring larger spacing between events.
+          const minGapSeconds = 0.5 + (1 - normalizedSensitivity) * 2.5
+          // Lower sensitivity = subtler zoom scale.
+          const scaleFactor = 0.45 + normalizedSensitivity * 0.9
+
+          let lastAcceptedTime = -Infinity
           zoomKeyframes = rawKfs
-            .filter((_kf: ZoomKeyframe, i: number) => {
-              // Deterministic: keep every Nth keyframe based on sensitivity
-              const keepEvery = Math.max(1, Math.round(1 / autoZoomSensitivity))
-              return i % keepEvery === 0
+            .filter((kf: ZoomKeyframe) => {
+              if (kf.time - lastAcceptedTime < minGapSeconds) {
+                return false
+              }
+              lastAcceptedTime = kf.time
+              return true
             })
-            .map((kf: ZoomKeyframe) => ({ ...kf, scale: 1 + (kf.scale - 1) * autoZoomSensitivity }))
+            .map((kf: ZoomKeyframe) => ({
+              ...kf,
+              scale: Math.max(1.1, Math.min(3.5, 1 + (kf.scale - 1) * scaleFactor))
+            }))
         } catch {
           zoomKeyframes = []
         }
