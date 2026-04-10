@@ -346,6 +346,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   const bgImage = await loadBackgroundImage(project)
   drawFrame(ctx, project, video, startTime, width, height, bgImage)
 
+  // `0` enables manual frame capture; frames are emitted only via requestFrame().
   const canvasStream = canvas.captureStream(0)
   const videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
   if (!videoTrack) {
