@@ -65,6 +65,7 @@ function getZoomTransform(keyframes: ZoomKeyframe[], time: number) {
 export default function VideoPreview({ videoRef }: VideoPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animFrameRef = useRef<number>(0)
+  const renderFrameRef = useRef<() => void>(() => {})
   // Stores CSS-space dimensions for drawing coordinates; backing canvas stays in pixel space.
   const canvasMetricsRef = useRef({
     width: FALLBACK_CANVAS_DIMENSION,
@@ -119,7 +120,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       // Load/cache the background image; render it cover-fitted to the canvas
       if (bgImageRef.current?.url !== bg.imageUrl) {
         const img = new Image()
-        img.onload = () => renderFrame()
+        img.onload = () => renderFrameRef.current()
         img.src = bg.imageUrl
         bgImageRef.current = { url: bg.imageUrl, img }
       }
@@ -229,11 +230,18 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     }
 
     if (video && !video.paused && !video.ended) {
-      animFrameRef.current = requestAnimationFrame(renderFrame)
+      animFrameRef.current = requestAnimationFrame(renderFrameRef.current)
     } else {
       animFrameRef.current = 0
     }
   }, [project, currentTime, videoRef])
+
+  useEffect(() => {
+    renderFrameRef.current = renderFrame
+    if (animFrameRef.current === 0) {
+      renderFrameRef.current()
+    }
+  }, [renderFrame])
 
   useEffect(() => {
     const video = videoRef.current
@@ -249,15 +257,13 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
       const baseCssHeight = Math.max(FALLBACK_CANVAS_DIMENSION, rect.height)
       const pixelWidth = Math.ceil(baseCssWidth * devicePixelRatio)
       const pixelHeight = Math.ceil(baseCssHeight * devicePixelRatio)
-      const cssWidth = pixelWidth / devicePixelRatio
-      const cssHeight = pixelHeight / devicePixelRatio
       const previousMetrics = canvasMetricsRef.current
       const didCssMetricsChange =
-        previousMetrics.width !== cssWidth ||
-        previousMetrics.height !== cssHeight ||
+        previousMetrics.width !== baseCssWidth ||
+        previousMetrics.height !== baseCssHeight ||
         previousMetrics.devicePixelRatio !== devicePixelRatio
 
-      canvasMetricsRef.current = { width: cssWidth, height: cssHeight, devicePixelRatio }
+      canvasMetricsRef.current = { width: baseCssWidth, height: baseCssHeight, devicePixelRatio }
       const didPixelSizeChange = currentCanvas.width !== pixelWidth || currentCanvas.height !== pixelHeight
       if (didPixelSizeChange) {
         currentCanvas.width = pixelWidth
@@ -269,7 +275,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
 
     const startRenderLoop = () => {
       if (animFrameRef.current === 0) {
-        animFrameRef.current = requestAnimationFrame(renderFrame)
+        animFrameRef.current = requestAnimationFrame(renderFrameRef.current)
       }
     }
 
@@ -278,7 +284,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         cancelAnimationFrame(animFrameRef.current)
         animFrameRef.current = 0
       }
-      renderFrame()
+      renderFrameRef.current()
     }
 
     syncCanvasMetrics()
@@ -322,7 +328,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         animFrameRef.current = 0
       }
     }
-  }, [renderFrame, videoRef])
+  }, [videoRef])
 
   const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!project) return
