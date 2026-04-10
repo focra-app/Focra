@@ -346,7 +346,8 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   const bgImage = await loadBackgroundImage(project)
   drawFrame(ctx, project, video, startTime, width, height, bgImage)
 
-  const canvasStream = canvas.captureStream(settings.fps)
+  const canvasStream = canvas.captureStream(0)
+  const canvasVideoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
 
   if (typeof video.captureStream === 'function') {
     try {
@@ -371,22 +372,6 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   })
 
   const chunks: Blob[] = []
-  let raf = 0
-  let finished = false
-
-  const finishRecording = () => {
-    if (finished) return
-    finished = true
-    if (raf) {
-      cancelAnimationFrame(raf)
-      raf = 0
-    }
-    video.pause()
-    if (recorder.state !== 'inactive') {
-      recorder.stop()
-    }
-  }
-
   const exportBlobPromise = new Promise<Blob>((resolve, reject) => {
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) chunks.push(event.data)
@@ -402,22 +387,26 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
   })
 
-  const renderLoop = () => {
-    const renderTime = Math.min(video.currentTime, endTime)
-    drawFrame(ctx, project, video, renderTime, width, height, bgImage)
+  recorder.start()
 
-    if (video.currentTime >= endTime || video.ended) {
-      finishRecording()
-      return
+  try {
+    const frameDuration = 1 / settings.fps
+    const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
+
+    for (let frameIndex = 0; frameIndex <= totalFrames; frameIndex += 1) {
+      const renderTime = Math.min(endTime, startTime + frameIndex * frameDuration)
+      await seekTo(video, renderTime)
+      drawFrame(ctx, project, video, renderTime, width, height, bgImage)
+      canvasVideoTrack?.requestFrame()
     }
-
-    raf = requestAnimationFrame(renderLoop)
+  } catch (err) {
+    canvasStream.getTracks().forEach((track) => track.stop())
+    throw err
+  } finally {
+    if (recorder.state !== 'inactive') {
+      recorder.stop()
+    }
   }
-
-  recorder.start(1000)
-  video.currentTime = startTime
-  await video.play()
-  raf = requestAnimationFrame(renderLoop)
 
   return exportBlobPromise
 }
@@ -453,8 +442,6 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         update({ format: filteredOption.value })
       }
 
-      const exportedBlob = await renderVideoWithEffects(project, { ...settings, format: filteredOption.value })
-
       const result = await window.electronAPI.showSaveDialog({
         defaultName: `focra-export.${filteredOption.extension}`,
         filters: [
@@ -467,6 +454,8 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         setExporting(false)
         return
       }
+
+      const exportedBlob = await renderVideoWithEffects(project, { ...settings, format: filteredOption.value })
 
       const buffer = await exportedBlob.arrayBuffer()
       const saveResult = await window.electronAPI.saveFile(result.saveToken, buffer)

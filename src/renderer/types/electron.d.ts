@@ -14,10 +14,12 @@ interface MouseClickData {
 interface ElectronAPI {
   getSources: () => Promise<import('../types').DesktopSource[]>
   /** Returns a one-time save token (not a raw file path) for use with saveFile. */
-  showSaveDialog: (options: {
-    defaultName: string
-    filters?: Array<{ name: string; extensions: string[] }>
-  }) => Promise<{ canceled: boolean; saveToken: string | null }>
+  showSaveDialog: (
+    options: string | {
+      defaultName: string
+      filters?: Array<{ name: string; extensions: string[] }>
+    }
+  ) => Promise<{ canceled: boolean; saveToken: string | null }>
   /** Accepts a one-time token from showSaveDialog; returns success/error info. */
   saveFile: (token: string, buffer: ArrayBuffer) => Promise<{ success: boolean; error?: string }>
   generateZoomKeyframes: (

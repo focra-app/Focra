@@ -26,7 +26,7 @@ const api = {
   getSources: (): Promise<DesktopSource[]> => ipcRenderer.invoke('get-sources'),
 
   showSaveDialog: (
-    options: {
+    options: string | {
       defaultName: string
       filters?: Array<{ name: string; extensions: string[] }>
     }
