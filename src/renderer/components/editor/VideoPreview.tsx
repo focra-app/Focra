@@ -81,9 +81,9 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx || !project) return
 
-    const { width: W, height: H, devicePixelRatio } = canvasMetricsRef.current
-    const scaleX = W > 0 ? canvas.width / W : devicePixelRatio
-    const scaleY = H > 0 ? canvas.height / H : devicePixelRatio
+    const { width: W, height: H } = canvasMetricsRef.current
+    const scaleX = canvas.width / W
+    const scaleY = canvas.height / H
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0)
