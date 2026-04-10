@@ -367,16 +367,6 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   await waitForVideoEvent(video, 'loadedmetadata')
   await seekTo(video, startTime)
 
-  const audioVideo = document.createElement('video')
-  audioVideo.src = project.videoUrl
-  audioVideo.preload = 'auto'
-  // Keep playback inaudible during export while still allowing captureStream audio.
-  audioVideo.muted = false
-  audioVideo.volume = 0
-  audioVideo.playsInline = true
-  await waitForVideoEvent(audioVideo, 'loadedmetadata')
-  await seekTo(audioVideo, startTime)
-
   const bgImage = await loadBackgroundImage(project)
   drawFrame(ctx, project, video, startTime, width, height, bgImage)
 
@@ -385,6 +375,26 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   const videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
   if (!videoTrack) {
     throw new Error('Unable to initialize export video track')
+  }
+
+  const audioVideo = document.createElement('video')
+  const cleanupAudioVideo = () => {
+    audioVideo.pause()
+    audioVideo.removeAttribute('src')
+    audioVideo.load()
+  }
+  try {
+    audioVideo.src = project.videoUrl
+    audioVideo.preload = 'auto'
+    // Keep playback inaudible during export while still allowing captureStream audio.
+    audioVideo.muted = false
+    audioVideo.volume = 0
+    audioVideo.playsInline = true
+    await waitForVideoEvent(audioVideo, 'loadedmetadata')
+    await seekTo(audioVideo, startTime)
+  } catch (err) {
+    cleanupAudioVideo()
+    throw err
   }
 
   if (typeof audioVideo.captureStream === 'function') {
@@ -413,7 +423,14 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   const exportBufferPromise = new Promise<ArrayBuffer>((resolve, reject) => {
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
-        chunkPromises.push(event.data.arrayBuffer().then((buffer) => new Uint8Array(buffer)))
+        chunkPromises.push(
+          event.data
+            .arrayBuffer()
+            .then((buffer) => new Uint8Array(buffer))
+            .catch((err) => {
+              throw new Error(`Export chunk buffering failed: ${String(err)}`)
+            })
+        )
       }
     }
 
@@ -468,9 +485,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     canvasStream.getTracks().forEach((track) => track.stop())
     throw err
   } finally {
-    audioVideo.pause()
-    audioVideo.removeAttribute('src')
-    audioVideo.load()
+    cleanupAudioVideo()
     if (recorder.state !== 'inactive') {
       recorder.stop()
     }
