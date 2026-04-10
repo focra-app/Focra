@@ -370,6 +370,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   const audioVideo = document.createElement('video')
   audioVideo.src = project.videoUrl
   audioVideo.preload = 'auto'
+  // Keep playback inaudible during export while still allowing captureStream audio.
   audioVideo.muted = false
   audioVideo.volume = 0
   audioVideo.playsInline = true
@@ -442,24 +443,27 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
 
   try {
     const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
+    const frameDurationMs = 1000 / settings.fps
     let audioPlaying = false
     try {
       await audioVideo.play()
       audioPlaying = true
-    } catch {
+    } catch (err) {
+      console.warn('Export audio playback could not start; continuing with best-effort audio capture', err)
       audioPlaying = false
     }
     const exportStartWallClock = performance.now()
 
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
-      await waitUntil(exportStartWallClock + (frameIndex * 1000) / settings.fps)
+      await waitUntil(exportStartWallClock + frameIndex * frameDurationMs)
       const renderTime = Math.min(endTime, startTime + frameIndex / settings.fps)
       await seekTo(video, renderTime)
       drawFrame(ctx, project, video, renderTime, width, height, bgImage)
       videoTrack.requestFrame()
     }
     if (audioPlaying) {
-      await waitUntil(exportStartWallClock + (totalFrames * 1000) / settings.fps)
+      // Keep recorder wall-clock duration aligned so the captured audio tail is included.
+      await waitUntil(exportStartWallClock + totalFrames * frameDurationMs)
     }
   } catch (err) {
     canvasStream.getTracks().forEach((track) => track.stop())
