@@ -555,7 +555,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   })
 
   recorder.start(RECORDER_TIMESLICE_MS)
-  let renderError: unknown = null
+  let capturedRenderError: unknown = null
 
   try {
     const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
@@ -606,7 +606,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       await waitUntil(exportStartWallClock + totalFrames * frameDurationMs)
     }
   } catch (err) {
-    renderError = err
+    capturedRenderError = err
   } finally {
     cleanupAudioVideo()
     if (recorder.state !== 'inactive') {
@@ -614,13 +614,13 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
   }
 
-  if (renderError) {
+  if (capturedRenderError) {
     try {
       await exportBufferPromise
-    } catch {
-      // Ignore recorder errors when a render error already occurred.
+    } catch (err) {
+      console.warn('Export recorder cleanup failed after render error', err)
     }
-    throw renderError
+    throw capturedRenderError
   }
 
   return exportBufferPromise
