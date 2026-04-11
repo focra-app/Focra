@@ -83,11 +83,12 @@ function parseSaveDialogOptions(
   if (!optionsArg || typeof optionsArg.defaultName !== 'string' || optionsArg.defaultName.trim() === '') {
     return null
   }
+  const defaultName = optionsArg.defaultName.trim()
   if (optionsArg.filters === undefined) {
-    return { defaultName: optionsArg.defaultName }
+    return { defaultName }
   }
   if (!Array.isArray(optionsArg.filters)) {
-    return null
+    return { defaultName }
   }
 
   const sanitizedFilters = optionsArg.filters
@@ -106,10 +107,10 @@ function parseSaveDialogOptions(
     .filter((filter): filter is { name: string; extensions: string[] } => filter !== null)
 
   if (sanitizedFilters.length === 0) {
-    return null
+    return { defaultName }
   }
 
-  return { defaultName: optionsArg.defaultName, filters: sanitizedFilters }
+  return { defaultName, filters: sanitizedFilters }
 }
 
 export function registerIpcHandlers(): void {

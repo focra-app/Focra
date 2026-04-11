@@ -482,9 +482,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     stopCanvasStreamTracks()
     throw new Error('Unable to initialize export video track')
   }
-  let requestFrame: (() => void) | null =
-    typeof videoTrack.requestFrame === 'function' ? () => videoTrack.requestFrame() : null
-  if (!requestFrame) {
+  if (typeof videoTrack.requestFrame !== 'function') {
     stopCanvasStreamTracks()
     canvasStream = canvas.captureStream(settings.fps)
     videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
@@ -493,7 +491,8 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       throw new Error('Unable to initialize export video track')
     }
   }
-  requestFrame = typeof videoTrack.requestFrame === 'function' ? () => videoTrack.requestFrame() : null
+  const requestFrame =
+    typeof videoTrack.requestFrame === 'function' ? () => videoTrack.requestFrame() : null
 
   const audioVideo = document.createElement('video')
   const cleanupAudioVideo = () => {
