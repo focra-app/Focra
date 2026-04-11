@@ -205,9 +205,11 @@ function getSupportedMimeTypeForStream(option: ExportFormatOption, hasAudioTrack
 }
 
 function isFormatSupportedForExport(option: ExportFormatOption) {
+  const supportsWithAudio = getSupportedMimeTypeForStream(option, true) !== null
+  const supportsVideoOnly = getSupportedMimeTypeForStream(option, false) !== null
   return (
-    getSupportedMimeTypeForStream(option, true) !== null
-    || getSupportedMimeTypeForStream(option, false) !== null
+    supportsWithAudio
+    || supportsVideoOnly
   )
 }
 
@@ -618,7 +620,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     try {
       await exportBufferPromise
     } catch (err) {
-      console.warn('Export recorder cleanup failed after render error', err)
+      console.warn('Failed to complete export buffer promise during error cleanup (expected)', err)
     }
     throw capturedRenderError
   }
