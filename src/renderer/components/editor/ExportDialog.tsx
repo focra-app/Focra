@@ -556,8 +556,8 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       try {
         const blob = new Blob(recordedChunks, { type: mimeType })
         resolve(await blob.arrayBuffer())
-      } catch {
-        reject(new Error('Export recording failed'))
+      } catch (err) {
+        reject(new Error(`Export recording failed: ${String(err)}`))
       }
     }
   })
