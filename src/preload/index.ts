@@ -30,7 +30,7 @@ const api = {
       defaultName: string
       filters?: Array<{ name: string; extensions: string[] }>
     }
-  ): Promise<{ canceled: boolean; saveToken: string | null }> =>
+  ): Promise<{ canceled: boolean; saveToken: string | null; error?: string }> =>
     ipcRenderer.invoke('show-save-dialog', options),
 
   saveFile: (token: string, buffer: ArrayBuffer): Promise<{ success: boolean; error?: string }> =>

@@ -96,6 +96,7 @@ function parseSaveDialogOptions(
       if (!filter || typeof filter.name !== 'string' || filter.name.trim() === '') {
         return null
       }
+      const filterName = filter.name.trim()
       if (!Array.isArray(filter.extensions)) {
         return null
       }
@@ -103,7 +104,7 @@ function parseSaveDialogOptions(
         .map((extension) => (typeof extension === 'string' ? extension.trim() : ''))
         .filter((extension) => extension !== '')
       return sanitizedExtensions.length > 0
-        ? { name: filter.name, extensions: sanitizedExtensions }
+        ? { name: filterName, extensions: sanitizedExtensions }
         : null
     })
     .filter((filter): filter is { name: string; extensions: string[] } => filter !== null)
