@@ -167,6 +167,28 @@ function isFormatSupportedForExport(option: ExportFormatOption) {
   )
 }
 
+function chooseMimeTypeForCanvasStream(option: ExportFormatOption, canvasStream: MediaStream) {
+  const audioTracks = canvasStream.getAudioTracks()
+  if (audioTracks.length > 0) {
+    const mimeTypeWithAudio = getSupportedMimeTypeForStream(option, true)
+    if (mimeTypeWithAudio) {
+      return mimeTypeWithAudio
+    }
+  }
+
+  const videoOnlyMimeType = getSupportedMimeTypeForStream(option, false)
+  if (!videoOnlyMimeType) {
+    return null
+  }
+
+  for (const track of audioTracks) {
+    canvasStream.removeTrack(track)
+    track.stop()
+  }
+
+  return videoOnlyMimeType
+}
+
 function computeVisibleAnnotationsForTime(
   sortedAnnotations: EditorProject['annotations'],
   currentVisibleAnnotations: EditorProject['annotations'],
@@ -488,9 +510,9 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
   }
 
-  const mimeType = getSupportedMimeTypeForStream(formatOption, canvasStream.getAudioTracks().length > 0)
+  const mimeType = chooseMimeTypeForCanvasStream(formatOption, canvasStream)
   if (!mimeType) {
-    throw new Error(`${formatOption.label} export is not supported for the current audio/video stream configuration`)
+    throw new Error(`${formatOption.label} export is not supported for the current stream`)
   }
 
   const pixelRate = width * height * settings.fps
