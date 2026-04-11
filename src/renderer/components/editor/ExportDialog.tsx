@@ -18,6 +18,13 @@ type ExportFormatOption = {
   mimeTypes: string[]
 }
 
+type ZoomTransform = {
+  scale: number
+  tx: number
+  ty: number
+  motionBlur: boolean
+}
+
 const FORMAT_OPTIONS: ExportFormatOption[] = [
   {
     value: 'webm',
@@ -79,20 +86,7 @@ function cubicEase(t: number, easing: ZoomKeyframe['easing']): number {
   }
 }
 
-function getZoomTransform(keyframes: ZoomKeyframe[], time: number) {
-  const activeKeyframe = keyframes.reduce<ZoomKeyframe | null>((latest, kf) => {
-    const inTime = kf.time
-    const outTime = kf.time + kf.duration
-    if (time < inTime || time > outTime) return latest
-    if (latest === null || kf.time > latest.time) return kf
-    return latest
-  }, null)
-
-  if (!activeKeyframe) {
-    return { scale: 1, tx: 0, ty: 0, motionBlur: false }
-  }
-
-  const kf = activeKeyframe
+function getZoomTransformFromKeyframe(kf: ZoomKeyframe, time: number): ZoomTransform {
   const inTime = kf.time
   const outTime = kf.time + kf.duration
   const halfDur = kf.duration * 0.25
@@ -113,6 +107,40 @@ function getZoomTransform(keyframes: ZoomKeyframe[], time: number) {
   const ty = (0.5 - kf.y) * (scale - 1)
 
   return { scale, tx, ty, motionBlur: kf.motionBlur && scale > 1.05 }
+}
+
+function getZoomTransform(keyframes: ZoomKeyframe[], time: number): ZoomTransform {
+  const activeKeyframe = keyframes.reduce<ZoomKeyframe | null>((latest, kf) => {
+    const inTime = kf.time
+    const outTime = kf.time + kf.duration
+    if (time < inTime || time > outTime) return latest
+    if (latest === null || kf.time > latest.time) return kf
+    return latest
+  }, null)
+
+  if (!activeKeyframe) {
+    return { scale: 1, tx: 0, ty: 0, motionBlur: false }
+  }
+
+  return getZoomTransformFromKeyframe(activeKeyframe, time)
+}
+
+function createSequentialZoomTransformGetter(keyframes: ZoomKeyframe[]) {
+  const sorted = [...keyframes].sort((a, b) => a.time - b.time)
+  let nextIndex = 0
+  let active: ZoomKeyframe[] = []
+
+  return (time: number): ZoomTransform => {
+    while (nextIndex < sorted.length && sorted[nextIndex].time <= time) {
+      active.push(sorted[nextIndex])
+      nextIndex += 1
+    }
+    if (active.length > 0) {
+      active = active.filter((kf) => time <= kf.time + kf.duration)
+    }
+    const activeKeyframe = active.length > 0 ? active[active.length - 1] : null
+    return activeKeyframe ? getZoomTransformFromKeyframe(activeKeyframe, time) : { scale: 1, tx: 0, ty: 0, motionBlur: false }
+  }
 }
 
 function getDimensions(settings: ExportSettings) {
@@ -143,6 +171,31 @@ function getFormatOption(format: ExportSettings['format']) {
 
 function getSupportedMimeType(option: ExportFormatOption): string | null {
   return option.mimeTypes.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null
+}
+
+function getVideoOnlyMimeCandidates(mimeType: string) {
+  const [container, params] = mimeType.split(';')
+  if (!params || !params.includes('codecs=')) {
+    return [mimeType]
+  }
+
+  const codecList = params.replace(/^.*codecs=/, '').split(',').map((codec) => codec.trim()).filter(Boolean)
+  const videoCodecs = codecList.filter(
+    (codec) => !/^(opus|vorbis|mp4a|aac)/i.test(codec)
+  )
+
+  if (videoCodecs.length === 0) {
+    return [container]
+  }
+
+  return [`${container};codecs=${videoCodecs.join(',')}`, container]
+}
+
+function getSupportedMimeTypeForStream(option: ExportFormatOption, hasAudioTrack: boolean) {
+  const candidates = hasAudioTrack
+    ? option.mimeTypes
+    : option.mimeTypes.flatMap((mimeType) => getVideoOnlyMimeCandidates(mimeType))
+  return candidates.find((mimeType, index) => candidates.indexOf(mimeType) === index && MediaRecorder.isTypeSupported(mimeType)) ?? null
 }
 
 function waitForVideoEvent(
@@ -208,7 +261,11 @@ function drawFrame(
   renderTime: number,
   width: number,
   height: number,
-  bgImage: HTMLImageElement | null
+  bgImage: HTMLImageElement | null,
+  precomputed?: {
+    zoomTransform?: ZoomTransform
+    visibleAnnotations?: EditorProject['annotations']
+  }
 ) {
   const W = width
   const H = height
@@ -262,7 +319,7 @@ function drawFrame(
 
   if (video.readyState < 2) return
 
-  const { scale, tx, ty, motionBlur } = getZoomTransform(project.zoomKeyframes, renderTime)
+  const { scale, tx, ty, motionBlur } = precomputed?.zoomTransform ?? getZoomTransform(project.zoomKeyframes, renderTime)
 
   const crop = project.cropSettings
   const srcX = crop ? crop.x * video.videoWidth : 0
@@ -300,9 +357,10 @@ function drawFrame(
   ctx.drawImage(video, srcX, srcY, srcW, srcH, dx, dy, dw, dh)
   ctx.restore()
 
-  const visibleAnnotations = project.annotations.filter(
-    (annotation) => renderTime >= annotation.time && renderTime <= annotation.time + annotation.duration
-  )
+  const visibleAnnotations = precomputed?.visibleAnnotations
+    ?? project.annotations.filter(
+      (annotation) => renderTime >= annotation.time && renderTime <= annotation.time + annotation.duration
+    )
 
   for (const annotation of visibleAnnotations) {
     const ax = annotation.x * W
@@ -343,8 +401,7 @@ function drawFrame(
 
 async function renderVideoWithEffects(project: EditorProject, settings: ExportSettings): Promise<ArrayBuffer> {
   const formatOption = getFormatOption(settings.format)
-  const mimeType = getSupportedMimeType(formatOption)
-  if (!mimeType) {
+  if (!getSupportedMimeType(formatOption)) {
     throw new Error(`${formatOption.label} export is not supported by this system`)
   }
 
@@ -408,6 +465,11 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
   }
 
+  const mimeType = getSupportedMimeTypeForStream(formatOption, canvasStream.getAudioTracks().length > 0)
+  if (!mimeType) {
+    throw new Error(`${formatOption.label} export is not supported for the current audio/video stream configuration`)
+  }
+
   const pixelRate = width * height * settings.fps
   const videoBitsPerSecond = Math.min(
     MAX_EXPORT_BITRATE,
@@ -459,8 +521,12 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   recorder.start(RECORDER_TIMESLICE_MS)
 
   try {
-    const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
+    const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps) + 1)
     const frameDurationMs = 1000 / settings.fps
+    const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
+    const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
+    let nextAnnotationIndex = 0
+    let activeAnnotations: EditorProject['annotations'] = []
     let audioPlaying = false
     try {
       await audioVideo.play()
@@ -473,8 +539,20 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       await waitUntil(exportStartWallClock + frameIndex * frameDurationMs)
       const renderTime = Math.min(endTime, startTime + frameIndex / settings.fps)
+      while (nextAnnotationIndex < sortedAnnotations.length && sortedAnnotations[nextAnnotationIndex].time <= renderTime) {
+        activeAnnotations.push(sortedAnnotations[nextAnnotationIndex])
+        nextAnnotationIndex += 1
+      }
+      if (activeAnnotations.length > 0) {
+        activeAnnotations = activeAnnotations.filter(
+          (annotation) => renderTime <= annotation.time + annotation.duration
+        )
+      }
       await seekTo(video, renderTime)
-      drawFrame(ctx, project, video, renderTime, width, height, bgImage)
+      drawFrame(ctx, project, video, renderTime, width, height, bgImage, {
+        zoomTransform: getSequentialZoomTransform(renderTime),
+        visibleAnnotations: activeAnnotations
+      })
       videoTrack.requestFrame()
     }
     if (audioPlaying) {
