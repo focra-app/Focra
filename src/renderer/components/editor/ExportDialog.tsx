@@ -128,17 +128,17 @@ function getZoomTransform(keyframes: ZoomKeyframe[], time: number): ZoomTransfor
 function createSequentialZoomTransformGetter(keyframes: ZoomKeyframe[]) {
   const sorted = [...keyframes].sort((a, b) => a.time - b.time)
   let nextIndex = 0
-  let active: ZoomKeyframe[] = []
+  let activeKeyframes: ZoomKeyframe[] = []
 
   return (time: number): ZoomTransform => {
     while (nextIndex < sorted.length && sorted[nextIndex].time <= time) {
-      active.push(sorted[nextIndex])
+      activeKeyframes.push(sorted[nextIndex])
       nextIndex += 1
     }
-    if (active.length > 0) {
-      active = active.filter((kf) => time <= kf.time + kf.duration)
+    if (activeKeyframes.length > 0) {
+      activeKeyframes = activeKeyframes.filter((kf) => time <= kf.time + kf.duration)
     }
-    const activeKeyframe = active.length > 0 ? active[active.length - 1] : null
+    const activeKeyframe = activeKeyframes.length > 0 ? activeKeyframes[activeKeyframes.length - 1] : null
     return activeKeyframe ? getZoomTransformFromKeyframe(activeKeyframe, time) : { scale: 1, tx: 0, ty: 0, motionBlur: false }
   }
 }
@@ -195,7 +195,8 @@ function getSupportedMimeTypeForStream(option: ExportFormatOption, hasAudioTrack
   const candidates = hasAudioTrack
     ? option.mimeTypes
     : option.mimeTypes.flatMap((mimeType) => getVideoOnlyMimeCandidates(mimeType))
-  return candidates.find((mimeType, index) => candidates.indexOf(mimeType) === index && MediaRecorder.isTypeSupported(mimeType)) ?? null
+  const uniqueCandidates = Array.from(new Set(candidates))
+  return uniqueCandidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null
 }
 
 function waitForVideoEvent(
@@ -526,7 +527,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
     const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
     let nextAnnotationIndex = 0
-    let activeAnnotations: EditorProject['annotations'] = []
+    let visibleAnnotations: EditorProject['annotations'] = []
     let audioPlaying = false
     try {
       await audioVideo.play()
@@ -540,18 +541,18 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       await waitUntil(exportStartWallClock + frameIndex * frameDurationMs)
       const renderTime = Math.min(endTime, startTime + frameIndex / settings.fps)
       while (nextAnnotationIndex < sortedAnnotations.length && sortedAnnotations[nextAnnotationIndex].time <= renderTime) {
-        activeAnnotations.push(sortedAnnotations[nextAnnotationIndex])
+        visibleAnnotations.push(sortedAnnotations[nextAnnotationIndex])
         nextAnnotationIndex += 1
       }
-      if (activeAnnotations.length > 0) {
-        activeAnnotations = activeAnnotations.filter(
+      if (visibleAnnotations.length > 0) {
+        visibleAnnotations = visibleAnnotations.filter(
           (annotation) => renderTime <= annotation.time + annotation.duration
         )
       }
       await seekTo(video, renderTime)
       drawFrame(ctx, project, video, renderTime, width, height, bgImage, {
         zoomTransform: getSequentialZoomTransform(renderTime),
-        visibleAnnotations: activeAnnotations
+        visibleAnnotations
       })
       videoTrack.requestFrame()
     }
