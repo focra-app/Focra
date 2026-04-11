@@ -507,6 +507,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       stopCanvasStreamTracks()
       throw err
     }
+    // In fallback mode, captureStream(fps) emits frames automatically without requestFrame().
     requestFrame = getRequestFrame(videoTrack)
   }
 
@@ -625,6 +626,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
         zoomTransform: getSequentialZoomTransform(renderTime),
         visibleAnnotations
       })
+      // requestFrame is only available in manual captureStream(0) mode.
       requestFrame?.()
       lastRenderedTime = renderTime
     }

@@ -131,7 +131,11 @@ export function registerIpcHandlers(): void {
     ) => {
       const parsedOptions = parseSaveDialogOptions(optionsInput)
       if (!parsedOptions) {
-        return { canceled: true, saveToken: null, error: 'Invalid save dialog options' }
+        return {
+          canceled: true,
+          saveToken: null,
+          error: 'Invalid save dialog options: defaultName must be a non-empty string'
+        }
       }
       const defaultName = parsedOptions.defaultName
       const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
