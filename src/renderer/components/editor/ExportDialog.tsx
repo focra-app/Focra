@@ -207,9 +207,7 @@ function waitForVideoEvent(
     const clearListeners = () => {
       video.removeEventListener(eventName, onDone)
       video.removeEventListener('error', onError)
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId)
-      }
+      window.clearTimeout(timeoutId)
     }
 
     const onDone = () => {
@@ -262,6 +260,7 @@ async function loadBackgroundImage(project: EditorProject): Promise<HTMLImageEle
   const loaded = await new Promise<boolean>((resolve) => {
     image.onload = () => resolve(true)
     image.onerror = () => resolve(false)
+    // Set src after listeners are attached to avoid missing a cached load event.
     image.src = background.imageUrl
   })
 
