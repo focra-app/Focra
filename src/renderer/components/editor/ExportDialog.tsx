@@ -61,6 +61,7 @@ const EXPORT_BITS_PER_PIXEL_PER_FRAME = 0.08
 const PREVIEW_PADDING_PX = 40
 const MIN_WAIT_MS = 1
 const RECORDER_TIMESLICE_MS = 1000
+const END_FRAME_EPSILON_SECONDS = 0.0005
 
 function AspectRatioIcon({ ratio }: { ratio: string }) {
   const dims: Record<string, { w: number; h: number }> = {
@@ -131,12 +132,12 @@ function createSequentialZoomTransformGetter(keyframes: ZoomKeyframe[]) {
   let activeKeyframes: ZoomKeyframe[] = []
 
   return (time: number): ZoomTransform => {
+    if (activeKeyframes.length > 0) {
+      activeKeyframes = activeKeyframes.filter((kf) => time <= kf.time + kf.duration)
+    }
     while (keyframeIndex < sorted.length && sorted[keyframeIndex].time <= time) {
       activeKeyframes.push(sorted[keyframeIndex])
       keyframeIndex += 1
-    }
-    if (activeKeyframes.length > 0) {
-      activeKeyframes = activeKeyframes.filter((kf) => time <= kf.time + kf.duration)
     }
     const activeKeyframe = activeKeyframes.length > 0 ? activeKeyframes[activeKeyframes.length - 1] : null
     return activeKeyframe ? getZoomTransformFromKeyframe(activeKeyframe, time) : { scale: 1, tx: 0, ty: 0, motionBlur: false }
@@ -204,6 +205,32 @@ function getSupportedMimeTypeForStream(option: ExportFormatOption, hasAudioTrack
     : option.mimeTypes.flatMap((mimeType) => getVideoOnlyMimeCandidates(mimeType))
   const uniqueCandidates = Array.from(new Set(candidates))
   return uniqueCandidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null
+}
+
+function updateVisibleAnnotationsForTime(
+  sortedAnnotations: EditorProject['annotations'],
+  currentVisibleAnnotations: EditorProject['annotations'],
+  nextAnnotationIndex: number,
+  renderTime: number
+) {
+  let updatedNextAnnotationIndex = nextAnnotationIndex
+  const updatedVisibleAnnotations = [...currentVisibleAnnotations]
+  while (
+    updatedNextAnnotationIndex < sortedAnnotations.length &&
+    sortedAnnotations[updatedNextAnnotationIndex].time <= renderTime
+  ) {
+    updatedVisibleAnnotations.push(sortedAnnotations[updatedNextAnnotationIndex])
+    updatedNextAnnotationIndex += 1
+  }
+
+  const filteredVisibleAnnotations = updatedVisibleAnnotations.filter(
+    (annotation) => renderTime <= annotation.time + annotation.duration
+  )
+
+  return {
+    nextAnnotationIndex: updatedNextAnnotationIndex,
+    visibleAnnotations: filteredVisibleAnnotations
+  }
 }
 
 function waitForVideoEvent(
@@ -548,15 +575,14 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       await waitUntil(exportStartWallClock + frameIndex * frameDurationMs)
       const renderTime = Math.min(endTime, startTime + frameIndex / settings.fps)
-      while (nextAnnotationIndex < sortedAnnotations.length && sortedAnnotations[nextAnnotationIndex].time <= renderTime) {
-        visibleAnnotations.push(sortedAnnotations[nextAnnotationIndex])
-        nextAnnotationIndex += 1
-      }
-      if (visibleAnnotations.length > 0) {
-        visibleAnnotations = visibleAnnotations.filter(
-          (annotation) => renderTime <= annotation.time + annotation.duration
-        )
-      }
+      const annotationUpdate = updateVisibleAnnotationsForTime(
+        sortedAnnotations,
+        visibleAnnotations,
+        nextAnnotationIndex,
+        renderTime
+      )
+      nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
+      visibleAnnotations = annotationUpdate.visibleAnnotations
       await seekTo(video, renderTime)
       drawFrame(ctx, project, video, renderTime, width, height, bgImage, {
         zoomTransform: getSequentialZoomTransform(renderTime),
@@ -566,18 +592,17 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       lastRenderedTime = renderTime
     }
 
-    if (endTime - lastRenderedTime > 0.0005) {
+    if (endTime - lastRenderedTime > END_FRAME_EPSILON_SECONDS) {
       const renderTime = endTime
       await waitUntil(exportStartWallClock + (endTime - startTime) * 1000)
-      while (nextAnnotationIndex < sortedAnnotations.length && sortedAnnotations[nextAnnotationIndex].time <= renderTime) {
-        visibleAnnotations.push(sortedAnnotations[nextAnnotationIndex])
-        nextAnnotationIndex += 1
-      }
-      if (visibleAnnotations.length > 0) {
-        visibleAnnotations = visibleAnnotations.filter(
-          (annotation) => renderTime <= annotation.time + annotation.duration
-        )
-      }
+      const annotationUpdate = updateVisibleAnnotationsForTime(
+        sortedAnnotations,
+        visibleAnnotations,
+        nextAnnotationIndex,
+        renderTime
+      )
+      nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
+      visibleAnnotations = annotationUpdate.visibleAnnotations
       await seekTo(video, renderTime)
       drawFrame(ctx, project, video, renderTime, width, height, bgImage, {
         zoomTransform: getSequentialZoomTransform(renderTime),
