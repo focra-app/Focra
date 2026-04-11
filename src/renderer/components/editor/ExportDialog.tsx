@@ -494,10 +494,10 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     stopCanvasStreamTracks()
     throw err
   }
-  const getRequestFrame = (track: CanvasCaptureMediaStreamTrack): (() => void) | null =>
+  const createRequestFrameWrapper = (track: CanvasCaptureMediaStreamTrack): (() => void) | null =>
     typeof track.requestFrame === 'function' ? () => track.requestFrame() : null
 
-  let requestFrame = getRequestFrame(videoTrack)
+  let requestFrame = createRequestFrameWrapper(videoTrack)
   if (!requestFrame) {
     stopCanvasStreamTracks()
     canvasStream = canvas.captureStream(settings.fps)
@@ -508,7 +508,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       throw err
     }
     // In fallback mode, captureStream(fps) emits frames automatically without requestFrame().
-    requestFrame = getRequestFrame(videoTrack)
+    requestFrame = createRequestFrameWrapper(videoTrack)
   }
 
   const audioVideo = document.createElement('video')
