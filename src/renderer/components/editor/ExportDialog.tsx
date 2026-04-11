@@ -618,14 +618,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   try {
     exportedBuffer = await exportBufferPromise
   } catch (err) {
-    if (renderError) {
-      throw renderError
-    }
-    throw err
-  }
-
-  if (renderError) {
-    throw renderError
+    throw renderError ?? err
   }
 
   return exportedBuffer
