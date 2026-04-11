@@ -623,6 +623,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     if (recorderStarted && recorder.state !== 'inactive') {
       recorder.stop()
     } else if (!recorderStarted) {
+      // onstop won't fire if start() never succeeded, so stop tracks here.
       stopCanvasStreamTracks()
     }
   }
