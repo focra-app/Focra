@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useEditorStore } from '../../store/useEditorStore'
-import type { ZoomKeyframe } from '../../types'
+import { getZoomTransformAtTime } from './zoomTransform'
 
 interface VideoPreviewProps {
   videoRef: React.RefObject<HTMLVideoElement>
@@ -10,57 +10,6 @@ const FALLBACK_CANVAS_DIMENSION = 1
 const MAX_MOTION_BLUR_PX = 1.5
 const MOTION_BLUR_SCALE_FACTOR = 1.2
 const MIN_VISIBLE_MOTION_BLUR_PX = 0.5
-
-function cubicEase(t: number, easing: ZoomKeyframe['easing']): number {
-  switch (easing) {
-    case 'ease-in': return t * t * t
-    case 'ease-out': return 1 - Math.pow(1 - t, 3)
-    case 'ease-in-out': return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
-    default: return t
-  }
-}
-
-function getZoomTransform(keyframes: ZoomKeyframe[], time: number) {
-  // Pick the latest-starting keyframe that contains `time` so that
-  // overlapping/unsorted keyframes always resolve deterministically.
-  const activeKeyframe = keyframes.reduce<ZoomKeyframe | null>((latest, kf) => {
-    const inTime = kf.time
-    const outTime = kf.time + kf.duration
-    if (time < inTime || time > outTime) return latest
-    if (latest === null || kf.time > latest.time) return kf
-    return latest
-  }, null)
-
-  if (!activeKeyframe) {
-    return { scale: 1, tx: 0, ty: 0, motionBlur: false }
-  }
-
-  const kf = activeKeyframe
-  const inTime = kf.time
-  const outTime = kf.time + kf.duration
-  const halfDur = kf.duration * 0.25 // transition portion
-
-  let scale = 1
-  let progress = 0
-
-  if (time < inTime + halfDur) {
-    // Zoom in
-    progress = (time - inTime) / halfDur
-    scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
-  } else if (time > outTime - halfDur) {
-    // Zoom out
-    progress = (outTime - time) / halfDur
-    scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
-  } else {
-    // Hold
-    scale = kf.scale
-  }
-
-  const tx = (0.5 - kf.x) * (scale - 1)
-  const ty = (0.5 - kf.y) * (scale - 1)
-
-  return { scale, tx, ty, motionBlur: kf.motionBlur && scale > 1.05 }
-}
 
 export default function VideoPreview({ videoRef }: VideoPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -150,7 +99,7 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     }
 
     if (video && video.readyState >= 2) {
-      const zoom = getZoomTransform(project.zoomKeyframes, renderTime)
+      const zoom = getZoomTransformAtTime(project.zoomKeyframes, renderTime)
       const { scale, tx, ty, motionBlur } = zoom
 
       // Apply crop or use full video

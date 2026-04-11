@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Download, X, Check } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
 import type { EditorProject, ExportSettings, ZoomKeyframe } from '../../types'
+import { getZoomTransformAtTime, getZoomTransformFromKeyframe } from './zoomTransform'
 
 interface ExportDialogProps {
   onClose: () => void
@@ -18,12 +19,7 @@ type ExportFormatOption = {
   mimeTypes: string[]
 }
 
-type ZoomTransform = {
-  scale: number
-  tx: number
-  ty: number
-  motionBlur: boolean
-}
+type ZoomTransform = ReturnType<typeof getZoomTransformAtTime>
 
 const FORMAT_OPTIONS: ExportFormatOption[] = [
   {
@@ -79,52 +75,8 @@ function AspectRatioIcon({ ratio }: { ratio: string }) {
   )
 }
 
-function cubicEase(t: number, easing: ZoomKeyframe['easing']): number {
-  switch (easing) {
-    case 'ease-in': return t * t * t
-    case 'ease-out': return 1 - Math.pow(1 - t, 3)
-    case 'ease-in-out': return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
-    default: return t
-  }
-}
-
-function getZoomTransformFromKeyframe(kf: ZoomKeyframe, time: number): ZoomTransform {
-  const inTime = kf.time
-  const outTime = kf.time + kf.duration
-  const halfDur = kf.duration * 0.25
-
-  let scale = 1
-
-  if (time < inTime + halfDur) {
-    const progress = (time - inTime) / halfDur
-    scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
-  } else if (time > outTime - halfDur) {
-    const progress = (outTime - time) / halfDur
-    scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
-  } else {
-    scale = kf.scale
-  }
-
-  const tx = (0.5 - kf.x) * (scale - 1)
-  const ty = (0.5 - kf.y) * (scale - 1)
-
-  return { scale, tx, ty, motionBlur: kf.motionBlur && scale > 1.05 }
-}
-
 function getZoomTransform(keyframes: ZoomKeyframe[], time: number): ZoomTransform {
-  const activeKeyframe = keyframes.reduce<ZoomKeyframe | null>((latest, kf) => {
-    const inTime = kf.time
-    const outTime = kf.time + kf.duration
-    if (time < inTime || time > outTime) return latest
-    if (latest === null || kf.time > latest.time) return kf
-    return latest
-  }, null)
-
-  if (!activeKeyframe) {
-    return { scale: 1, tx: 0, ty: 0, motionBlur: false }
-  }
-
-  return getZoomTransformFromKeyframe(activeKeyframe, time)
+  return getZoomTransformAtTime(keyframes, time)
 }
 
 function createSequentialZoomTransformGetter(keyframes: ZoomKeyframe[]) {
@@ -444,8 +396,8 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   const formatOption = getFormatOption(settings.format)
 
   const { width, height } = getDimensions(settings)
-  const startTime = Math.max(0, Math.min(project.duration, project.trimPoints.inPoint))
-  const endTime = Math.max(startTime + 0.05, Math.min(project.duration, project.trimPoints.outPoint))
+  let startTime = 0
+  let endTime = 0
 
   const canvas = document.createElement('canvas')
   canvas.width = width
@@ -460,6 +412,9 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   video.playsInline = true
 
   await waitForVideoEvent(video, 'loadedmetadata')
+  const mediaDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : project.duration
+  startTime = Math.max(0, Math.min(mediaDuration, project.trimPoints.inPoint))
+  endTime = Math.max(startTime, Math.min(mediaDuration, project.trimPoints.outPoint))
   await seekTo(video, startTime)
 
   const bgImage = await loadBackgroundImage(project)
