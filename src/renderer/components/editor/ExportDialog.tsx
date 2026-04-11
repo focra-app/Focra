@@ -204,10 +204,14 @@ function waitForVideoEvent(
     return Promise.resolve()
   }
   return new Promise((resolve, reject) => {
+    let timeoutId: number | undefined
+
     const clearListeners = () => {
       video.removeEventListener(eventName, onDone)
       video.removeEventListener('error', onError)
-      window.clearTimeout(timeoutId)
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId)
+      }
     }
 
     const onDone = () => {
@@ -220,7 +224,7 @@ function waitForVideoEvent(
       reject(new Error(`Video failed while waiting for '${eventName}'`))
     }
 
-    const timeoutId = window.setTimeout(() => {
+    timeoutId = window.setTimeout(() => {
       clearListeners()
       reject(new Error(`Timed out waiting for video event '${eventName}'`))
     }, MEDIA_EVENT_TIMEOUT_MS)
