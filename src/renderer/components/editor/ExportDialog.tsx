@@ -171,10 +171,6 @@ function getFormatOption(format: ExportSettings['format']) {
   return FORMAT_OPTIONS.find((option) => option.value === format) ?? FORMAT_OPTIONS[0]
 }
 
-function getSupportedMimeType(option: ExportFormatOption): string | null {
-  return option.mimeTypes.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null
-}
-
 function getVideoOnlyMimeCandidates(mimeType: string) {
   const [container, params] = mimeType.split(';')
   if (!params || !params.includes('codecs=')) {
@@ -206,6 +202,13 @@ function getSupportedMimeTypeForStream(option: ExportFormatOption, hasAudioTrack
     : option.mimeTypes.flatMap((mimeType) => getVideoOnlyMimeCandidates(mimeType))
   const uniqueCandidates = Array.from(new Set(candidates))
   return uniqueCandidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null
+}
+
+function isFormatSupportedForExport(option: ExportFormatOption) {
+  return (
+    getSupportedMimeTypeForStream(option, true) !== null
+    || getSupportedMimeTypeForStream(option, false) !== null
+  )
 }
 
 function computeVisibleAnnotationsForTime(
@@ -552,6 +555,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   })
 
   recorder.start(RECORDER_TIMESLICE_MS)
+  let renderError: unknown = null
 
   try {
     const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
@@ -602,8 +606,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       await waitUntil(exportStartWallClock + totalFrames * frameDurationMs)
     }
   } catch (err) {
-    canvasStream.getTracks().forEach((track) => track.stop())
-    throw err
+    renderError = err
   } finally {
     cleanupAudioVideo()
     if (recorder.state !== 'inactive') {
@@ -611,7 +614,21 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
   }
 
-  return exportBufferPromise
+  let exportedBuffer: ArrayBuffer
+  try {
+    exportedBuffer = await exportBufferPromise
+  } catch (err) {
+    if (renderError) {
+      throw renderError
+    }
+    throw err
+  }
+
+  if (renderError) {
+    throw renderError
+  }
+
+  return exportedBuffer
 }
 
 export default function ExportDialog({ onClose }: ExportDialogProps) {
@@ -627,7 +644,7 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
     setExportSettings({ ...settings, ...partial })
   }
 
-  const availableFormatOptions = FORMAT_OPTIONS.filter((option) => getSupportedMimeType(option) !== null)
+  const availableFormatOptions = FORMAT_OPTIONS.filter((option) => isFormatSupportedForExport(option))
 
   const handleExport = async () => {
     setExporting(true)
@@ -635,7 +652,7 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
 
     try {
       const selectedOption = getFormatOption(settings.format)
-      const filteredOption = getSupportedMimeType(selectedOption) ? selectedOption : availableFormatOptions[0]
+      const filteredOption = isFormatSupportedForExport(selectedOption) ? selectedOption : availableFormatOptions[0]
 
       if (!filteredOption) {
         throw new Error('No supported export formats are available on this system')
@@ -732,7 +749,7 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
               <span className="label">Format</span>
               <div className="grid grid-cols-2 gap-2">
                 {FORMAT_OPTIONS.map((option) => {
-                  const isSupported = getSupportedMimeType(option) !== null
+                  const isSupported = isFormatSupportedForExport(option)
                   return (
                     <button
                       key={option.value}
