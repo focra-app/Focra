@@ -58,6 +58,7 @@ const PREVIEW_PADDING_PX = 40
 const MIN_WAIT_MS = 1
 const RECORDER_TIMESLICE_MS = 1000
 const MIN_EXPORT_DURATION_SECONDS = 0.05
+const MEDIA_EVENT_TIMEOUT_MS = 15000
 // ~0.5ms tolerance for floating-point time comparisons near trim boundaries.
 const END_FRAME_EPSILON_SECONDS = 0.0005
 
@@ -202,12 +203,32 @@ function waitForVideoEvent(
   if ((eventName === 'loadeddata' || eventName === 'canplay') && video.readyState >= 2) {
     return Promise.resolve()
   }
-  return new Promise((resolve) => {
-    const onDone = () => {
+  return new Promise((resolve, reject) => {
+    const clearListeners = () => {
       video.removeEventListener(eventName, onDone)
+      video.removeEventListener('error', onError)
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
+    }
+
+    const onDone = () => {
+      clearListeners()
       resolve()
     }
+
+    const onError = () => {
+      clearListeners()
+      reject(new Error(`Video failed while waiting for '${eventName}'`))
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      clearListeners()
+      reject(new Error(`Timed out waiting for video event '${eventName}'`))
+    }, MEDIA_EVENT_TIMEOUT_MS)
+
     video.addEventListener(eventName, onDone, { once: true })
+    video.addEventListener('error', onError, { once: true })
   })
 }
 
@@ -238,14 +259,13 @@ async function loadBackgroundImage(project: EditorProject): Promise<HTMLImageEle
   if (background.type !== 'image' || !background.imageUrl) return null
 
   const image = new Image()
-  image.src = background.imageUrl
-
-  await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve()
-    image.onerror = () => reject(new Error('Failed to load background image for export'))
+  const loaded = await new Promise<boolean>((resolve) => {
+    image.onload = () => resolve(true)
+    image.onerror = () => resolve(false)
+    image.src = background.imageUrl
   })
 
-  return image
+  return loaded ? image : null
 }
 
 function drawFrame(
