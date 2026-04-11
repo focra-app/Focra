@@ -127,13 +127,13 @@ function getZoomTransform(keyframes: ZoomKeyframe[], time: number): ZoomTransfor
 
 function createSequentialZoomTransformGetter(keyframes: ZoomKeyframe[]) {
   const sorted = [...keyframes].sort((a, b) => a.time - b.time)
-  let nextIndex = 0
+  let keyframeIndex = 0
   let activeKeyframes: ZoomKeyframe[] = []
 
   return (time: number): ZoomTransform => {
-    while (nextIndex < sorted.length && sorted[nextIndex].time <= time) {
-      activeKeyframes.push(sorted[nextIndex])
-      nextIndex += 1
+    while (keyframeIndex < sorted.length && sorted[keyframeIndex].time <= time) {
+      activeKeyframes.push(sorted[keyframeIndex])
+      keyframeIndex += 1
     }
     if (activeKeyframes.length > 0) {
       activeKeyframes = activeKeyframes.filter((kf) => time <= kf.time + kf.duration)
@@ -179,9 +179,16 @@ function getVideoOnlyMimeCandidates(mimeType: string) {
     return [mimeType]
   }
 
-  const codecList = params.replace(/^.*codecs=/, '').split(',').map((codec) => codec.trim()).filter(Boolean)
-  const videoCodecs = codecList.filter(
-    (codec) => !/^(opus|vorbis|mp4a|aac)/i.test(codec)
+  const match = params.match(/codecs=(?:"([^"]+)"|([^;]+))/i)
+  const codecsValue = (match?.[1] ?? match?.[2] ?? '').trim()
+  if (!codecsValue) {
+    return [container]
+  }
+
+  const codecList = codecsValue.split(',').map((codec) => codec.trim()).filter(Boolean)
+  const videoCodecPrefixes = ['vp8', 'vp9', 'av01', 'avc1', 'hev1', 'hvc1', 'theora', 'mp4v']
+  const videoCodecs = codecList.filter((codec) =>
+    videoCodecPrefixes.some((prefix) => codec.toLowerCase().startsWith(prefix))
   )
 
   if (videoCodecs.length === 0) {
@@ -522,7 +529,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   recorder.start(RECORDER_TIMESLICE_MS)
 
   try {
-    const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps) + 1)
+    const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
     const frameDurationMs = 1000 / settings.fps
     const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
     const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
@@ -536,10 +543,32 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       console.warn('Export audio playback could not start; continuing with best-effort audio capture', err)
     }
     const exportStartWallClock = performance.now()
+    let lastRenderedTime = startTime
 
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
       await waitUntil(exportStartWallClock + frameIndex * frameDurationMs)
       const renderTime = Math.min(endTime, startTime + frameIndex / settings.fps)
+      while (nextAnnotationIndex < sortedAnnotations.length && sortedAnnotations[nextAnnotationIndex].time <= renderTime) {
+        visibleAnnotations.push(sortedAnnotations[nextAnnotationIndex])
+        nextAnnotationIndex += 1
+      }
+      if (visibleAnnotations.length > 0) {
+        visibleAnnotations = visibleAnnotations.filter(
+          (annotation) => renderTime <= annotation.time + annotation.duration
+        )
+      }
+      await seekTo(video, renderTime)
+      drawFrame(ctx, project, video, renderTime, width, height, bgImage, {
+        zoomTransform: getSequentialZoomTransform(renderTime),
+        visibleAnnotations
+      })
+      videoTrack.requestFrame()
+      lastRenderedTime = renderTime
+    }
+
+    if (endTime - lastRenderedTime > 0.0005) {
+      const renderTime = endTime
+      await waitUntil(exportStartWallClock + (endTime - startTime) * 1000)
       while (nextAnnotationIndex < sortedAnnotations.length && sortedAnnotations[nextAnnotationIndex].time <= renderTime) {
         visibleAnnotations.push(sortedAnnotations[nextAnnotationIndex])
         nextAnnotationIndex += 1
