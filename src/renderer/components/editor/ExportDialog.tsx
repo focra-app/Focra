@@ -57,6 +57,7 @@ const EXPORT_BITS_PER_PIXEL_PER_FRAME = 0.08
 const PREVIEW_PADDING_PX = 40
 const MIN_WAIT_MS = 1
 const RECORDER_TIMESLICE_MS = 1000
+const MIN_EXPORT_DURATION_SECONDS = 0.05
 // ~0.5ms tolerance for floating-point time comparisons near trim boundaries.
 const END_FRAME_EPSILON_SECONDS = 0.0005
 
@@ -413,8 +414,8 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   const mediaDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : project.duration
   const startTime = Math.max(0, Math.min(mediaDuration, project.trimPoints.inPoint))
   const requestedEndTime = Math.min(mediaDuration, project.trimPoints.outPoint)
-  const minDuration = Math.min(0.05, Math.max(0, mediaDuration - startTime))
-  const endTime = Math.max(Math.min(mediaDuration, startTime + minDuration), requestedEndTime)
+  const minDuration = Math.min(MIN_EXPORT_DURATION_SECONDS, Math.max(0, mediaDuration - startTime))
+  const endTime = Math.min(mediaDuration, Math.max(startTime + minDuration, requestedEndTime))
   await seekTo(video, startTime)
 
   const bgImage = await loadBackgroundImage(project)
