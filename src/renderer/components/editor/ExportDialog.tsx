@@ -437,9 +437,6 @@ function drawFrame(
 
 async function renderVideoWithEffects(project: EditorProject, settings: ExportSettings): Promise<ArrayBuffer> {
   const formatOption = getFormatOption(settings.format)
-  if (!getSupportedMimeType(formatOption)) {
-    throw new Error(`${formatOption.label} export is not supported by this system`)
-  }
 
   const { width, height } = getDimensions(settings)
   const startTime = Math.max(0, Math.min(project.duration, project.trimPoints.inPoint))
