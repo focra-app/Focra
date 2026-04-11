@@ -614,14 +614,16 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
   }
 
-  let exportedBuffer: ArrayBuffer
-  try {
-    exportedBuffer = await exportBufferPromise
-  } catch (err) {
-    throw renderError ?? err
+  if (renderError) {
+    try {
+      await exportBufferPromise
+    } catch {
+      // Ignore recorder errors when a render error already occurred.
+    }
+    throw renderError
   }
 
-  return exportedBuffer
+  return exportBufferPromise
 }
 
 export default function ExportDialog({ onClose }: ExportDialogProps) {
