@@ -474,8 +474,12 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
 
   // `0` enables manual frame capture; frames are emitted only via requestFrame().
   const canvasStream = canvas.captureStream(0)
+  const stopCanvasStreamTracks = () => {
+    canvasStream.getTracks().forEach((track) => track.stop())
+  }
   const videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
   if (!videoTrack) {
+    stopCanvasStreamTracks()
     throw new Error('Unable to initialize export video track')
   }
 
@@ -510,34 +514,36 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
   }
 
-  const mimeType = chooseMimeTypeForCanvasStream(formatOption, canvasStream)
-  if (!mimeType) {
-    throw new Error(`${formatOption.label} export is not supported for the current stream`)
+  let mimeType: string
+  let recorder: MediaRecorder
+  try {
+    const selectedMimeType = chooseMimeTypeForCanvasStream(formatOption, canvasStream)
+    if (!selectedMimeType) {
+      throw new Error(`${formatOption.label} export is not supported for the current stream`)
+    }
+    mimeType = selectedMimeType
+
+    const pixelRate = width * height * settings.fps
+    const videoBitsPerSecond = Math.min(
+      MAX_EXPORT_BITRATE,
+      Math.max(MIN_EXPORT_BITRATE, Math.round(pixelRate * EXPORT_BITS_PER_PIXEL_PER_FRAME))
+    )
+
+    recorder = new MediaRecorder(canvasStream, {
+      mimeType,
+      videoBitsPerSecond
+    })
+  } catch (err) {
+    cleanupAudioVideo()
+    stopCanvasStreamTracks()
+    throw err
   }
 
-  const pixelRate = width * height * settings.fps
-  const videoBitsPerSecond = Math.min(
-    MAX_EXPORT_BITRATE,
-    Math.max(MIN_EXPORT_BITRATE, Math.round(pixelRate * EXPORT_BITS_PER_PIXEL_PER_FRAME))
-  )
-
-  const recorder = new MediaRecorder(canvasStream, {
-    mimeType,
-    videoBitsPerSecond
-  })
-
-  const chunkPromises: Array<Promise<Uint8Array>> = []
+  const recordedChunks: Blob[] = []
   const exportBufferPromise = new Promise<ArrayBuffer>((resolve, reject) => {
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
-        chunkPromises.push(
-          event.data
-            .arrayBuffer()
-            .then((buffer) => new Uint8Array(buffer))
-            .catch((err) => {
-              throw new Error(`Export chunk buffering failed: ${String(err)}`)
-            })
-        )
+        recordedChunks.push(event.data)
       }
     }
 
@@ -546,27 +552,23 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
 
     recorder.onstop = async () => {
-      canvasStream.getTracks().forEach((track) => track.stop())
+      stopCanvasStreamTracks()
       try {
-        const chunks = await Promise.all(chunkPromises)
-        const totalSize = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
-        const merged = new Uint8Array(totalSize)
-        let offset = 0
-        for (const chunk of chunks) {
-          merged.set(chunk, offset)
-          offset += chunk.byteLength
-        }
-        resolve(merged.buffer)
+        const blob = new Blob(recordedChunks, { type: mimeType })
+        resolve(await blob.arrayBuffer())
       } catch {
         reject(new Error('Export recording failed'))
       }
     }
   })
 
-  recorder.start(RECORDER_TIMESLICE_MS)
+  let recorderStarted = false
   let capturedRenderError: unknown = null
 
   try {
+    recorder.start(RECORDER_TIMESLICE_MS)
+    recorderStarted = true
+
     const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
     const frameDurationMs = 1000 / settings.fps
     const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
@@ -618,16 +620,20 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     capturedRenderError = err
   } finally {
     cleanupAudioVideo()
-    if (recorder.state !== 'inactive') {
+    if (recorderStarted && recorder.state !== 'inactive') {
       recorder.stop()
+    } else if (!recorderStarted) {
+      stopCanvasStreamTracks()
     }
   }
 
   if (capturedRenderError) {
-    try {
-      await exportBufferPromise
-    } catch (err) {
-      console.warn('Failed to complete export buffer promise during error cleanup (expected)', err)
+    if (recorderStarted) {
+      try {
+        await exportBufferPromise
+      } catch (err) {
+        console.warn('Failed to complete export buffer promise during error cleanup (expected)', err)
+      }
     }
     throw capturedRenderError
   }
