@@ -396,8 +396,6 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   const formatOption = getFormatOption(settings.format)
 
   const { width, height } = getDimensions(settings)
-  let startTime = 0
-  let endTime = 0
 
   const canvas = document.createElement('canvas')
   canvas.width = width
@@ -413,8 +411,10 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
 
   await waitForVideoEvent(video, 'loadedmetadata')
   const mediaDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : project.duration
-  startTime = Math.max(0, Math.min(mediaDuration, project.trimPoints.inPoint))
-  endTime = Math.max(startTime, Math.min(mediaDuration, project.trimPoints.outPoint))
+  const startTime = Math.max(0, Math.min(mediaDuration, project.trimPoints.inPoint))
+  const requestedEndTime = Math.min(mediaDuration, project.trimPoints.outPoint)
+  const minDuration = Math.min(0.05, Math.max(0, mediaDuration - startTime))
+  const endTime = Math.max(Math.min(mediaDuration, startTime + minDuration), requestedEndTime)
   await seekTo(video, startTime)
 
   const bgImage = await loadBackgroundImage(project)
