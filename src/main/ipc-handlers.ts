@@ -99,9 +99,9 @@ function parseSaveDialogOptions(
       if (!Array.isArray(filter.extensions)) {
         return null
       }
-      const extensions = filter.extensions.filter(
-        (extension) => typeof extension === 'string' && extension.trim() !== ''
-      )
+      const extensions = filter.extensions
+        .map((extension) => (typeof extension === 'string' ? extension.trim() : ''))
+        .filter((extension) => extension !== '')
       return extensions.length > 0 ? { name: filter.name, extensions } : null
     })
     .filter((filter): filter is { name: string; extensions: string[] } => filter !== null)

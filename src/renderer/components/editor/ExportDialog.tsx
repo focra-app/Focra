@@ -473,26 +473,42 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   drawFrame(ctx, project, video, startTime, width, height, bgImage)
 
   // `0` enables manual frame capture; frames are emitted only via requestFrame().
+  const getCanvasVideoTrackOrThrow = (
+    stream: MediaStream
+  ): CanvasCaptureMediaStreamTrack => {
+    const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
+    if (!track) {
+      throw new Error('Unable to initialize export video track')
+    }
+    return track
+  }
+
   let canvasStream = canvas.captureStream(0)
   const stopCanvasStreamTracks = () => {
     canvasStream.getTracks().forEach((track) => track.stop())
   }
-  let videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
-  if (!videoTrack) {
+  let videoTrack: CanvasCaptureMediaStreamTrack
+  try {
+    videoTrack = getCanvasVideoTrackOrThrow(canvasStream)
+  } catch (err) {
     stopCanvasStreamTracks()
-    throw new Error('Unable to initialize export video track')
+    throw err
   }
-  if (typeof videoTrack.requestFrame !== 'function') {
+  const getRequestFrame = (track: CanvasCaptureMediaStreamTrack): (() => void) | null =>
+    typeof track.requestFrame === 'function' ? () => track.requestFrame() : null
+
+  let requestFrame = getRequestFrame(videoTrack)
+  if (!requestFrame) {
     stopCanvasStreamTracks()
     canvasStream = canvas.captureStream(settings.fps)
-    videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
-    if (!videoTrack) {
+    try {
+      videoTrack = getCanvasVideoTrackOrThrow(canvasStream)
+    } catch (err) {
       stopCanvasStreamTracks()
-      throw new Error('Unable to initialize export video track')
+      throw err
     }
+    requestFrame = getRequestFrame(videoTrack)
   }
-  const requestFrame =
-    typeof videoTrack.requestFrame === 'function' ? () => videoTrack.requestFrame() : null
 
   const audioVideo = document.createElement('video')
   const cleanupAudioVideo = () => {
