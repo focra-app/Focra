@@ -54,7 +54,7 @@ const MIN_VISIBLE_MOTION_BLUR_PX = 0.5
 const MIN_EXPORT_BITRATE = 3_000_000
 const MAX_EXPORT_BITRATE = 35_000_000
 const EXPORT_BITS_PER_PIXEL_PER_FRAME = 0.08
-const PREVIEW_PADDING_PX = 40
+const RENDER_PADDING_PX = 40
 const MIN_WAIT_MS = 1
 const RECORDER_TIMESLICE_MS = 1000
 const MIN_EXPORT_DURATION_SECONDS = 0.05
@@ -344,7 +344,7 @@ function drawFrame(
   const srcW = crop ? crop.width * video.videoWidth : video.videoWidth
   const srcH = crop ? crop.height * video.videoHeight : video.videoHeight
 
-  const padding = PREVIEW_PADDING_PX
+  const padding = RENDER_PADDING_PX
   const availW = Math.max(1, W - padding * 2)
   const availH = Math.max(1, H - padding * 2)
   const ratio = srcW / srcH
@@ -680,7 +680,11 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
             <Download size={18} className="text-accent" />
             <h2 className="text-base font-semibold text-text-primary">Export Video</h2>
           </div>
-          <button onClick={onClose} className="text-text-secondary hover:text-text-primary transition-colors">
+          <button
+            onClick={onClose}
+            disabled={exporting}
+            className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             <X size={18} />
           </button>
         </div>

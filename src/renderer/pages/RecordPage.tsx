@@ -322,7 +322,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             })
             .map((kf: ZoomKeyframe) => ({
               ...kf,
-              scale: Math.max(1.1, Math.min(3.5, 1 + (kf.scale - 1) * scaleFactor))
+              scale: Math.max(1.0, Math.min(3.5, 1 + (kf.scale - 1) * scaleFactor))
             }))
         } catch {
           zoomKeyframes = []
