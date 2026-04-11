@@ -71,6 +71,47 @@ function getCaptureBounds(sourceId: string, displayId?: string | null) {
   return fallbackBounds
 }
 
+function parseSaveDialogOptions(
+  optionsInput:
+    | string
+    | {
+        defaultName: string
+        filters?: Array<{ name: string; extensions: string[] }>
+      }
+): { defaultName: string; filters?: Array<{ name: string; extensions: string[] }> } | null {
+  const optionsArg = typeof optionsInput === 'string' ? { defaultName: optionsInput } : optionsInput
+  if (!optionsArg || typeof optionsArg.defaultName !== 'string' || optionsArg.defaultName.trim() === '') {
+    return null
+  }
+  if (optionsArg.filters === undefined) {
+    return { defaultName: optionsArg.defaultName }
+  }
+  if (!Array.isArray(optionsArg.filters)) {
+    return null
+  }
+
+  const sanitizedFilters = optionsArg.filters
+    .map((filter) => {
+      if (!filter || typeof filter.name !== 'string' || filter.name.trim() === '') {
+        return null
+      }
+      if (!Array.isArray(filter.extensions)) {
+        return null
+      }
+      const extensions = filter.extensions.filter(
+        (extension) => typeof extension === 'string' && extension.trim() !== ''
+      )
+      return extensions.length > 0 ? { name: filter.name, extensions } : null
+    })
+    .filter((filter): filter is { name: string; extensions: string[] } => filter !== null)
+
+  if (sanitizedFilters.length === 0) {
+    return null
+  }
+
+  return { defaultName: optionsArg.defaultName, filters: sanitizedFilters }
+}
+
 export function registerIpcHandlers(): void {
   ipcMain.handle('get-sources', async () => {
     return getDesktopSources()
@@ -87,14 +128,15 @@ export function registerIpcHandlers(): void {
             filters?: Array<{ name: string; extensions: string[] }>
           }
     ) => {
-      const optionsArg = typeof optionsInput === 'string'
-        ? { defaultName: optionsInput }
-        : optionsInput
-      const defaultName = optionsArg.defaultName
+      const parsedOptions = parseSaveDialogOptions(optionsInput)
+      if (!parsedOptions) {
+        return { canceled: true, saveToken: null, error: 'Invalid save dialog options' }
+      }
+      const defaultName = parsedOptions.defaultName
       const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
       const options: Electron.SaveDialogOptions = {
         defaultPath: defaultName,
-        filters: optionsArg.filters ?? [
+        filters: parsedOptions.filters ?? [
           { name: 'WebM Video', extensions: ['webm'] },
           { name: 'All Files', extensions: ['*'] }
         ]

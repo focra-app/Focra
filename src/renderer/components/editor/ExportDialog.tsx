@@ -473,15 +473,27 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   drawFrame(ctx, project, video, startTime, width, height, bgImage)
 
   // `0` enables manual frame capture; frames are emitted only via requestFrame().
-  const canvasStream = canvas.captureStream(0)
+  let canvasStream = canvas.captureStream(0)
   const stopCanvasStreamTracks = () => {
     canvasStream.getTracks().forEach((track) => track.stop())
   }
-  const videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
+  let videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
   if (!videoTrack) {
     stopCanvasStreamTracks()
     throw new Error('Unable to initialize export video track')
   }
+  let requestFrame: (() => void) | null =
+    typeof videoTrack.requestFrame === 'function' ? () => videoTrack.requestFrame() : null
+  if (!requestFrame) {
+    stopCanvasStreamTracks()
+    canvasStream = canvas.captureStream(settings.fps)
+    videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
+    if (!videoTrack) {
+      stopCanvasStreamTracks()
+      throw new Error('Unable to initialize export video track')
+    }
+  }
+  requestFrame = typeof videoTrack.requestFrame === 'function' ? () => videoTrack.requestFrame() : null
 
   const audioVideo = document.createElement('video')
   const cleanupAudioVideo = () => {
@@ -569,7 +581,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     recorder.start(RECORDER_TIMESLICE_MS)
     recorderStarted = true
 
-    const totalFrames = Math.max(1, Math.ceil((endTime - startTime) * settings.fps))
+    const exportDurationMs = Math.max(0, (endTime - startTime) * 1000)
     const frameDurationMs = 1000 / settings.fps
     const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
     const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
@@ -598,14 +610,20 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
         zoomTransform: getSequentialZoomTransform(renderTime),
         visibleAnnotations
       })
-      videoTrack.requestFrame()
+      requestFrame?.()
       lastRenderedTime = renderTime
     }
 
-    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
-      await waitUntil(exportStartWallClock + frameIndex * frameDurationMs)
-      const renderTime = Math.min(endTime, startTime + frameIndex / settings.fps)
+    let nextFrameWallClock = exportStartWallClock
+    while (true) {
+      const elapsedWallClockMs = Math.max(0, performance.now() - exportStartWallClock)
+      const renderTime = Math.min(endTime, startTime + elapsedWallClockMs / 1000)
       await renderExportFrame(renderTime)
+      if (renderTime >= endTime - END_FRAME_EPSILON_SECONDS) {
+        break
+      }
+      nextFrameWallClock += frameDurationMs
+      await waitUntil(nextFrameWallClock)
     }
 
     if (endTime - lastRenderedTime > END_FRAME_EPSILON_SECONDS) {
@@ -614,7 +632,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
     if (audioPlaying) {
       // Keep recorder wall-clock duration aligned so the captured audio tail is included.
-      await waitUntil(exportStartWallClock + totalFrames * frameDurationMs)
+      await waitUntil(exportStartWallClock + exportDurationMs)
     }
   } catch (err) {
     capturedRenderError = err
