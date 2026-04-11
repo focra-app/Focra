@@ -716,7 +716,7 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
 
       if (result.canceled || !result.saveToken) {
         if (result.error) {
-          throw new Error(`Save dialog error: ${result.error}`)
+          throw new Error(`Failed to open save dialog: ${result.error}`)
         }
         setExporting(false)
         return
