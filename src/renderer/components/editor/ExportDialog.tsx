@@ -411,11 +411,17 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   video.playsInline = true
 
   await waitForVideoEvent(video, 'loadedmetadata')
-  const mediaDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : project.duration
+  const mediaDuration = Number.isFinite(video.duration) && video.duration > 0
+    ? video.duration
+    : (Number.isFinite(project.duration) && project.duration > 0 ? project.duration : 0)
+  if (mediaDuration <= 0) {
+    throw new Error('Unable to determine media duration for export')
+  }
   const startTime = Math.max(0, Math.min(mediaDuration, project.trimPoints.inPoint))
   const requestedEndTime = Math.min(mediaDuration, project.trimPoints.outPoint)
-  const minDuration = Math.min(MIN_EXPORT_DURATION_SECONDS, Math.max(0, mediaDuration - startTime))
-  const endTime = Math.min(mediaDuration, Math.max(startTime + minDuration, requestedEndTime))
+  const remainingDuration = Math.max(0, mediaDuration - startTime)
+  const effectiveMinDuration = Math.min(MIN_EXPORT_DURATION_SECONDS, remainingDuration)
+  const endTime = Math.min(mediaDuration, Math.max(startTime + effectiveMinDuration, requestedEndTime))
   await seekTo(video, startTime)
 
   const bgImage = await loadBackgroundImage(project)

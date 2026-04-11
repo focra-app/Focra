@@ -19,15 +19,15 @@ export function cubicEase(t: number, easing: ZoomKeyframe['easing']): number {
 export function getZoomTransformFromKeyframe(kf: ZoomKeyframe, time: number): ZoomTransform {
   const inTime = kf.time
   const outTime = kf.time + kf.duration
-  const transitionDur = kf.duration * 0.25
+  const transitionDuration = kf.duration * 0.25
 
   let scale = 1
 
-  if (time < inTime + transitionDur) {
-    const progress = (time - inTime) / transitionDur
+  if (time < inTime + transitionDuration) {
+    const progress = (time - inTime) / transitionDuration
     scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
-  } else if (time > outTime - transitionDur) {
-    const progress = (outTime - time) / transitionDur
+  } else if (time > outTime - transitionDuration) {
+    const progress = (outTime - time) / transitionDuration
     scale = 1 + (kf.scale - 1) * cubicEase(progress, kf.easing)
   } else {
     scale = kf.scale
