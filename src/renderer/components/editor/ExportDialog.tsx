@@ -61,6 +61,7 @@ const EXPORT_BITS_PER_PIXEL_PER_FRAME = 0.08
 const PREVIEW_PADDING_PX = 40
 const MIN_WAIT_MS = 1
 const RECORDER_TIMESLICE_MS = 1000
+// ~0.5ms tolerance for floating-point time comparisons near trim boundaries.
 const END_FRAME_EPSILON_SECONDS = 0.0005
 
 function AspectRatioIcon({ ratio }: { ratio: string }) {
@@ -207,7 +208,7 @@ function getSupportedMimeTypeForStream(option: ExportFormatOption, hasAudioTrack
   return uniqueCandidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null
 }
 
-function updateVisibleAnnotationsForTime(
+function computeVisibleAnnotationsForTime(
   sortedAnnotations: EditorProject['annotations'],
   currentVisibleAnnotations: EditorProject['annotations'],
   nextAnnotationIndex: number,
@@ -571,11 +572,8 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     }
     const exportStartWallClock = performance.now()
     let lastRenderedTime = startTime
-
-    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
-      await waitUntil(exportStartWallClock + frameIndex * frameDurationMs)
-      const renderTime = Math.min(endTime, startTime + frameIndex / settings.fps)
-      const annotationUpdate = updateVisibleAnnotationsForTime(
+    const renderExportFrame = async (renderTime: number) => {
+      const annotationUpdate = computeVisibleAnnotationsForTime(
         sortedAnnotations,
         visibleAnnotations,
         nextAnnotationIndex,
@@ -592,23 +590,15 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       lastRenderedTime = renderTime
     }
 
+    for (let frameIndex = 0; frameIndex < totalFrames; frameIndex += 1) {
+      await waitUntil(exportStartWallClock + frameIndex * frameDurationMs)
+      const renderTime = Math.min(endTime, startTime + frameIndex / settings.fps)
+      await renderExportFrame(renderTime)
+    }
+
     if (endTime - lastRenderedTime > END_FRAME_EPSILON_SECONDS) {
-      const renderTime = endTime
       await waitUntil(exportStartWallClock + (endTime - startTime) * 1000)
-      const annotationUpdate = updateVisibleAnnotationsForTime(
-        sortedAnnotations,
-        visibleAnnotations,
-        nextAnnotationIndex,
-        renderTime
-      )
-      nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
-      visibleAnnotations = annotationUpdate.visibleAnnotations
-      await seekTo(video, renderTime)
-      drawFrame(ctx, project, video, renderTime, width, height, bgImage, {
-        zoomTransform: getSequentialZoomTransform(renderTime),
-        visibleAnnotations
-      })
-      videoTrack.requestFrame()
+      await renderExportFrame(endTime)
     }
     if (audioPlaying) {
       // Keep recorder wall-clock duration aligned so the captured audio tail is included.
