@@ -20,6 +20,10 @@ type ExportFormatOption = {
 }
 
 type ZoomTransform = ReturnType<typeof getZoomTransformAtTime>
+type VideoFrameCallbackCapableVideo = HTMLVideoElement & {
+  requestVideoFrameCallback?: (callback: (now: number, metadata: { mediaTime: number }) => void) => number
+  cancelVideoFrameCallback?: (handle: number) => void
+}
 
 const FORMAT_OPTIONS: ExportFormatOption[] = [
   {
@@ -51,11 +55,10 @@ const FORMAT_OPTIONS: ExportFormatOption[] = [
 const MAX_MOTION_BLUR_PX = 1.5
 const MOTION_BLUR_SCALE_FACTOR = 1.2
 const MIN_VISIBLE_MOTION_BLUR_PX = 0.5
-const MIN_EXPORT_BITRATE = 3_000_000
-const MAX_EXPORT_BITRATE = 35_000_000
-const EXPORT_BITS_PER_PIXEL_PER_FRAME = 0.08
+const MIN_EXPORT_BITRATE = 8_000_000
+const MAX_EXPORT_BITRATE = 140_000_000
+const EXPORT_BITS_PER_PIXEL_PER_FRAME = 0.12
 const RENDER_PADDING_PX = 40
-const MIN_WAIT_MS = 1
 const RECORDER_TIMESLICE_MS = 1000
 const MIN_EXPORT_DURATION_SECONDS = 0.05
 const MEDIA_EVENT_TIMEOUT_MS = 15000
@@ -270,12 +273,6 @@ async function seekTo(video: HTMLVideoElement, time: number) {
   video.currentTime = time
   await seekedPromise
   await ensureVideoReadyForFrame(video)
-}
-
-function waitUntil(targetTimeMs: number): Promise<void> {
-  const remaining = targetTimeMs - performance.now()
-  if (remaining <= MIN_WAIT_MS) return Promise.resolve()
-  return new Promise((resolve) => setTimeout(resolve, remaining))
 }
 
 async function loadBackgroundImage(project: EditorProject): Promise<HTMLImageElement | null> {
@@ -597,7 +594,6 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     recorder.start(RECORDER_TIMESLICE_MS)
     recorderStarted = true
 
-    const exportDurationMs = Math.max(0, (endTime - startTime) * 1000)
     const frameDurationMs = 1000 / settings.fps
     const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
     const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
@@ -610,47 +606,117 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     } catch (err) {
       console.warn('Export audio playback could not start; continuing with best-effort audio capture', err)
     }
-    const exportStartWallClock = performance.now()
-    let lastRenderedTime = startTime
-    const renderExportFrame = async (renderTime: number) => {
+
+    const renderExportFrame = (renderTime: number) => {
+      const clampedTime = Math.max(startTime, Math.min(endTime, renderTime))
       const annotationUpdate = computeVisibleAnnotationsForTime(
         sortedAnnotations,
         visibleAnnotations,
         nextAnnotationIndex,
-        renderTime
+        clampedTime
       )
       nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
       visibleAnnotations = annotationUpdate.visibleAnnotations
-      await seekTo(video, renderTime)
-      drawFrame(ctx, project, video, renderTime, width, height, bgImage, {
-        zoomTransform: getSequentialZoomTransform(renderTime),
+      drawFrame(ctx, project, video, clampedTime, width, height, bgImage, {
+        zoomTransform: getSequentialZoomTransform(clampedTime),
         visibleAnnotations
       })
       // requestFrame is only available in manual captureStream(0) mode.
       requestFrame?.()
-      lastRenderedTime = renderTime
     }
 
-    let nextFrameWallClock = exportStartWallClock
-    while (true) {
-      const elapsedWallClockMs = Math.max(0, performance.now() - exportStartWallClock)
-      const renderTime = Math.min(endTime, startTime + elapsedWallClockMs / 1000)
-      await renderExportFrame(renderTime)
-      if (renderTime >= endTime - END_FRAME_EPSILON_SECONDS) {
-        break
+    renderExportFrame(startTime)
+    const frameCallbackVideo = video as VideoFrameCallbackCapableVideo
+    await new Promise<void>((resolve, reject) => {
+      let frameCallbackId: number | null = null
+      let timeoutId: ReturnType<typeof window.setTimeout> | null = null
+      let settled = false
+      let stagnantFrameCount = 0
+      let previousRenderTime = startTime
+
+      const cleanup = () => {
+        video.removeEventListener('error', onPlaybackError)
+        if (frameCallbackId !== null && frameCallbackVideo.cancelVideoFrameCallback) {
+          frameCallbackVideo.cancelVideoFrameCallback(frameCallbackId)
+          frameCallbackId = null
+        }
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId)
+          timeoutId = null
+        }
       }
-      nextFrameWallClock += frameDurationMs
-      await waitUntil(nextFrameWallClock)
-    }
 
-    if (endTime - lastRenderedTime > END_FRAME_EPSILON_SECONDS) {
-      await waitUntil(exportStartWallClock + (endTime - startTime) * 1000)
-      await renderExportFrame(endTime)
+      const finish = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve()
+      }
+
+      const fail = (err: unknown) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(err instanceof Error ? err : new Error(String(err)))
+      }
+
+      const onPlaybackError = () => {
+        fail(new Error('Video playback failed during export'))
+      }
+
+      const scheduleNextFrame = () => {
+        if (frameCallbackVideo.requestVideoFrameCallback) {
+          frameCallbackId = frameCallbackVideo.requestVideoFrameCallback(() => {
+            renderNextFrame()
+          })
+          return
+        }
+        timeoutId = window.setTimeout(() => {
+          renderNextFrame()
+        }, frameDurationMs)
+      }
+
+      const renderNextFrame = () => {
+        const renderTime = Math.max(startTime, Math.min(endTime, video.currentTime))
+        renderExportFrame(renderTime)
+
+        if (Math.abs(renderTime - previousRenderTime) <= END_FRAME_EPSILON_SECONDS) {
+          stagnantFrameCount += 1
+        } else {
+          stagnantFrameCount = 0
+          previousRenderTime = renderTime
+        }
+
+        if (stagnantFrameCount > settings.fps * 2) {
+          fail(new Error('Export playback stalled before reaching the trim end point'))
+          return
+        }
+
+        if (renderTime >= endTime - END_FRAME_EPSILON_SECONDS || video.ended) {
+          video.pause()
+          finish()
+          return
+        }
+        scheduleNextFrame()
+      }
+
+      video.addEventListener('error', onPlaybackError, { once: true })
+      void video.play()
+        .then(() => {
+          scheduleNextFrame()
+        })
+        .catch((err) => {
+          fail(new Error(`Export playback failed to start: ${String(err)}`))
+        })
+    })
+
+    if (video.currentTime < endTime - END_FRAME_EPSILON_SECONDS) {
+      await seekTo(video, endTime)
     }
-    if (audioPlaying) {
-      // Keep recorder wall-clock duration aligned so the captured audio tail is included.
-      await waitUntil(exportStartWallClock + exportDurationMs)
-    }
+    renderExportFrame(endTime)
+    video.pause()
+
+    if (audioPlaying) audioVideo.pause()
   } catch (err) {
     capturedRenderError = err
   } finally {
