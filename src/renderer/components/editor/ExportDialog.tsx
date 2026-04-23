@@ -622,10 +622,12 @@ async function renderVideoWithEffects(
     recorderStarted = true
 
     const frameDurationMs = 1000 / settings.fps
+    const totalExportDuration = Math.max(END_FRAME_EPSILON_SECONDS, endTime - startTime)
     const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
     const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
     let nextAnnotationIndex = 0
     let visibleAnnotations: EditorProject['annotations'] = []
+    let lastReportedProgress = -1
     onProgress?.({ progress: 0 })
 
     const renderExportFrame = (renderTime: number) => {
@@ -700,6 +702,11 @@ async function renderVideoWithEffects(
       const renderNextFrame = () => {
         const renderTime = Math.max(startTime, Math.min(endTime, video.currentTime))
         renderExportFrame(renderTime)
+        const progress = Math.max(0, Math.min(1, (renderTime - startTime) / totalExportDuration))
+        if (progress - lastReportedProgress >= 0.01 || progress >= 1) {
+          lastReportedProgress = progress
+          onProgress?.({ progress })
+        }
 
         if (Math.abs(renderTime - previousRenderTime) <= END_FRAME_EPSILON_SECONDS) {
           stagnantFrameCount += 1
@@ -770,6 +777,8 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
   const [exporting, setExporting] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [exportProgress, setExportProgress] = useState(0)
+  const [exportDetail, setExportDetail] = useState<string | null>(null)
 
   if (!project) return null
   const settings = project.exportSettings
@@ -783,6 +792,8 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
   const handleExport = async () => {
     setExporting(true)
     setError(null)
+    setExportProgress(0)
+    setExportDetail(null)
 
     try {
       const selectedOption = getFormatOption(settings.format)
@@ -813,7 +824,14 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         return
       }
 
-      const exportedBuffer = await renderVideoWithEffects(project, { ...settings, format: filteredOption.value })
+      const exportedBuffer = await renderVideoWithEffects(
+        project,
+        { ...settings, format: filteredOption.value },
+        ({ progress, detail }) => {
+          setExportProgress(Math.max(0, Math.min(1, progress)))
+          if (detail) setExportDetail(detail)
+        }
+      )
       const saveResult = await window.electronAPI.saveFile(result.saveToken, exportedBuffer)
       if (!saveResult.success) {
         throw new Error(saveResult.error ?? 'Failed to save exported file')
@@ -938,6 +956,21 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
           )}
 
           {error && <p className="text-red-400 text-sm">{error}</p>}
+
+          {exporting && (
+            <div className="space-y-1">
+              <div className="h-2 rounded-full bg-bg-tertiary overflow-hidden">
+                <div
+                  className="h-full bg-accent transition-[width] duration-200"
+                  style={{ width: `${Math.round(exportProgress * 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-text-secondary">
+                Export progress: {Math.round(exportProgress * 100)}%
+              </p>
+              {exportDetail && <p className="text-xs text-amber-300">{exportDetail}</p>}
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pt-2">
