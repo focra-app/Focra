@@ -86,6 +86,10 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   // Refs for proper cleanup of mic mixing resources
   const micStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const micGainRef = useRef<GainNode | null>(null)
+  const systemGainRef = useRef<GainNode | null>(null)
+  const micAudioTrackRef = useRef<MediaStreamTrack | null>(null)
+  const systemAudioTrackRef = useRef<MediaStreamTrack | null>(null)
   // Keep ref to the raw display stream so its audio tracks can be stopped on cleanup
   const displayStreamRef = useRef<MediaStream | null>(null)
   // Cleanup function returned by onMouseClick
@@ -144,29 +148,65 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       let combinedStream = displayStream
       micStreamRef.current = null
       audioContextRef.current = null
+      micGainRef.current = null
+      systemGainRef.current = null
+      micAudioTrackRef.current = null
+      systemAudioTrackRef.current = null
       displayStreamRef.current = displayStream
 
+      if (!systemAudioEnabled) {
+        // Some desktop-capture setups may still return an audio track despite audio:false.
+        // Explicitly remove it so the System Audio toggle is always respected.
+        for (const track of displayStream.getAudioTracks()) {
+          displayStream.removeTrack(track)
+          track.stop()
+        }
+      }
+
+      let micTrack: MediaStreamTrack | null = null
       if (micEnabled) {
         try {
           const micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-          const audioContext = new AudioContext()
-          const dest = audioContext.createMediaStreamDestination()
-          const micSource = audioContext.createMediaStreamSource(micStream)
-          micSource.connect(dest)
-          if (displayStream.getAudioTracks().length > 0) {
-            const sysSource = audioContext.createMediaStreamSource(displayStream)
-            sysSource.connect(dest)
-          }
-          combinedStream = new MediaStream([
-            ...displayStream.getVideoTracks(),
-            ...dest.stream.getTracks()
-          ])
-          // Keep references for cleanup
           micStreamRef.current = micStream
-          audioContextRef.current = audioContext
+          micTrack = micStream.getAudioTracks()[0] ?? null
+          micAudioTrackRef.current = micTrack
         } catch {
           // Mic not available, continue without it
         }
+      }
+
+      const systemTrack = displayStream.getAudioTracks()[0] ?? null
+      systemAudioTrackRef.current = systemTrack
+
+      if (micTrack || systemTrack) {
+        const audioContext = new AudioContext()
+        const dest = audioContext.createMediaStreamDestination()
+
+        if (systemTrack) {
+          const sysSource = audioContext.createMediaStreamSource(new MediaStream([systemTrack]))
+          const sysGain = audioContext.createGain()
+          sysGain.gain.value = systemAudioEnabled ? 1 : 0
+          sysSource.connect(sysGain)
+          sysGain.connect(dest)
+          systemGainRef.current = sysGain
+        }
+
+        if (micTrack) {
+          const micSource = audioContext.createMediaStreamSource(new MediaStream([micTrack]))
+          const micGain = audioContext.createGain()
+          micGain.gain.value = micEnabled ? 1 : 0
+          micSource.connect(micGain)
+          micGain.connect(dest)
+          micGainRef.current = micGain
+        }
+
+        audioContextRef.current = audioContext
+        const mixedTrack = dest.stream.getAudioTracks()[0]
+        combinedStream = mixedTrack
+          ? new MediaStream([...displayStream.getVideoTracks(), mixedTrack])
+          : new MediaStream([...displayStream.getVideoTracks()])
+      } else {
+        combinedStream = new MediaStream([...displayStream.getVideoTracks()])
       }
 
       streamRef.current = combinedStream
@@ -246,7 +286,31 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     displayStreamRef.current = null
     audioContextRef.current?.close()
     audioContextRef.current = null
+    micGainRef.current = null
+    systemGainRef.current = null
+    micAudioTrackRef.current = null
+    systemAudioTrackRef.current = null
   }, [])
+
+  useEffect(() => {
+    if (!isRecording) return
+    if (micGainRef.current) {
+      micGainRef.current.gain.value = micEnabled ? 1 : 0
+    }
+    if (micAudioTrackRef.current) {
+      micAudioTrackRef.current.enabled = micEnabled
+    }
+  }, [isRecording, micEnabled])
+
+  useEffect(() => {
+    if (!isRecording) return
+    if (systemGainRef.current) {
+      systemGainRef.current.gain.value = systemAudioEnabled ? 1 : 0
+    }
+    if (systemAudioTrackRef.current) {
+      systemAudioTrackRef.current.enabled = systemAudioEnabled
+    }
+  }, [isRecording, systemAudioEnabled])
 
   // Shared helper: stop the recorder, all stream tracks, audio resources, and reset state.
   // Called from error paths in startRecording and from stopRecording.

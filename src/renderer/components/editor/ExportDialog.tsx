@@ -8,6 +8,11 @@ interface ExportDialogProps {
   onClose: () => void
 }
 
+interface ExportProgressUpdate {
+  progress: number
+  detail?: string
+}
+
 const ASPECT_RATIOS: ExportSettings['aspectRatio'][] = ['16:9', '4:3', '1:1', '9:16']
 const RESOLUTIONS: ExportSettings['resolution'][] = ['720p', '1080p', '1440p', '4k']
 const FPS_OPTIONS: ExportSettings['fps'][] = [24, 30, 60]
@@ -64,6 +69,7 @@ const MIN_EXPORT_DURATION_SECONDS = 0.05
 const MEDIA_EVENT_TIMEOUT_MS = 15000
 // ~0.5ms tolerance for floating-point time comparisons near trim boundaries.
 const END_FRAME_EPSILON_SECONDS = 0.0005
+const MAX_UPSCALE_FACTOR = 1.15
 
 function AspectRatioIcon({ ratio }: { ratio: string }) {
   const dims: Record<string, { w: number; h: number }> = {
@@ -122,6 +128,28 @@ function getDimensions(settings: ExportSettings) {
   const height = Math.max(2, Math.round(baseHeight / 2) * 2)
 
   return { width, height }
+}
+
+function clampOutputToSourceDimensions(
+  requested: { width: number; height: number },
+  sourceWidth: number,
+  sourceHeight: number
+) {
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    return { ...requested, wasClamped: false }
+  }
+
+  const requestedPixels = requested.width * requested.height
+  const sourcePixels = sourceWidth * sourceHeight
+  const maxAllowedPixels = sourcePixels * MAX_UPSCALE_FACTOR
+  if (requestedPixels <= maxAllowedPixels) {
+    return { ...requested, wasClamped: false }
+  }
+
+  const scale = Math.sqrt(maxAllowedPixels / requestedPixels)
+  const width = Math.max(2, Math.round((requested.width * scale) / 2) * 2)
+  const height = Math.max(2, Math.round((requested.height * scale) / 2) * 2)
+  return { width, height, wasClamped: true }
 }
 
 function getFormatOption(format: ExportSettings['format']) {
@@ -435,21 +463,18 @@ function drawFrame(
   }
 }
 
-async function renderVideoWithEffects(project: EditorProject, settings: ExportSettings): Promise<ArrayBuffer> {
+async function renderVideoWithEffects(
+  project: EditorProject,
+  settings: ExportSettings,
+  onProgress?: (update: ExportProgressUpdate) => void
+): Promise<ArrayBuffer> {
   const formatOption = getFormatOption(settings.format)
-
-  const { width, height } = getDimensions(settings)
-
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Unable to initialize export renderer')
 
   const video = document.createElement('video')
   video.src = project.videoUrl
   video.preload = 'auto'
   video.muted = true
+  video.volume = 0
   video.playsInline = true
 
   await waitForVideoEvent(video, 'loadedmetadata')
@@ -464,6 +489,26 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
   const remainingDuration = Math.max(0, mediaDuration - startTime)
   const clampedMinDuration = Math.min(MIN_EXPORT_DURATION_SECONDS, remainingDuration)
   const endTime = Math.min(mediaDuration, Math.max(startTime + clampedMinDuration, requestedEndTime))
+
+  const requestedDimensions = getDimensions(settings)
+  const { width, height, wasClamped } = clampOutputToSourceDimensions(
+    requestedDimensions,
+    video.videoWidth,
+    video.videoHeight
+  )
+  if (wasClamped) {
+    onProgress?.({
+      progress: 0,
+      detail: `Requested resolution exceeds source quality. Export capped to ${width}x${height} for reliability.`
+    })
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Unable to initialize export renderer')
+
   await seekTo(video, startTime)
 
   const bgImage = await loadBackgroundImage(project)
@@ -508,33 +553,15 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     requestFrame = createRequestFrameWrapper(videoTrack)
   }
 
-  const audioVideo = document.createElement('video')
-  const cleanupAudioVideo = () => {
-    audioVideo.pause()
-    audioVideo.removeAttribute('src')
-    audioVideo.load()
-  }
-  try {
-    audioVideo.src = project.videoUrl
-    audioVideo.preload = 'auto'
-    // Keep playback inaudible during export while still allowing captureStream audio.
-    audioVideo.muted = false
-    audioVideo.volume = 0
-    audioVideo.playsInline = true
-    await waitForVideoEvent(audioVideo, 'loadedmetadata')
-    await seekTo(audioVideo, startTime)
-  } catch (err) {
-    cleanupAudioVideo()
-    throw err
-  }
-
-  if (typeof audioVideo.captureStream === 'function') {
+  let sourceAudioStream: MediaStream | null = null
+  if (typeof video.captureStream === 'function') {
     try {
-      const audioStream = audioVideo.captureStream()
-      for (const track of audioStream.getAudioTracks()) {
+      sourceAudioStream = video.captureStream()
+      for (const track of sourceAudioStream.getAudioTracks()) {
         canvasStream.addTrack(track)
       }
     } catch {
+      sourceAudioStream = null
       // Continue with video-only export if audio stream capture fails.
     }
   }
@@ -559,7 +586,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
       videoBitsPerSecond
     })
   } catch (err) {
-    cleanupAudioVideo()
+    sourceAudioStream?.getTracks().forEach((track) => track.stop())
     stopCanvasStreamTracks()
     throw err
   }
@@ -599,13 +626,7 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
     let nextAnnotationIndex = 0
     let visibleAnnotations: EditorProject['annotations'] = []
-    let audioPlaying = false
-    try {
-      await audioVideo.play()
-      audioPlaying = true
-    } catch (err) {
-      console.warn('Export audio playback could not start; continuing with best-effort audio capture', err)
-    }
+    onProgress?.({ progress: 0 })
 
     const renderExportFrame = (renderTime: number) => {
       const clampedTime = Math.max(startTime, Math.min(endTime, renderTime))
@@ -716,11 +737,14 @@ async function renderVideoWithEffects(project: EditorProject, settings: ExportSe
     renderExportFrame(endTime)
     video.pause()
 
-    if (audioPlaying) audioVideo.pause()
+    onProgress?.({ progress: 1 })
   } catch (err) {
     capturedRenderError = err
   } finally {
-    cleanupAudioVideo()
+    sourceAudioStream?.getTracks().forEach((track) => track.stop())
+    video.pause()
+    video.removeAttribute('src')
+    video.load()
     if (recorderStarted && recorder.state !== 'inactive') {
       recorder.stop()
     }
