@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Mic, Volume2, Zap } from 'lucide-react'
+import { Mic, Volume2, Zap, Video } from 'lucide-react'
 import SourceSelector from '../components/recording/SourceSelector'
 import RecordingControls from '../components/recording/RecordingControls'
 import RecordingPreview from '../components/recording/RecordingPreview'
@@ -70,12 +70,20 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const [systemAudioEnabled, setSystemAudioEnabled] = useState(true)
   const [autoZoomEnabled, setAutoZoomEnabled] = useState(true)
   const [autoZoomSensitivity, setAutoZoomSensitivity] = useState(0.7)
+  const [recordingResolution, setRecordingResolution] = useState<'auto' | '720p' | '1080p' | '1440p' | '4k'>('auto')
   const [isRecording, setIsRecording] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [elapsedTime, setElapsedTime] = useState(0)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [logoLoadFailed, setLogoLoadFailed] = useState(false)
+
+  const resolutionMap: Record<string, { width: number; height: number }> = {
+    '720p': { width: 1280, height: 720 },
+    '1080p': { width: 1920, height: 1080 },
+    '1440p': { width: 2560, height: 1440 },
+    '4k': { width: 3840, height: 2160 }
+  }
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -121,8 +129,17 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
         if (!active || isRecording) return
 
-        const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, captureBounds.width))
-        const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, captureBounds.height))
+        let targetWidth = captureBounds.width
+        let targetHeight = captureBounds.height
+
+        if (recordingResolution !== 'auto') {
+          const res = resolutionMap[recordingResolution]
+          targetWidth = res.width
+          targetHeight = res.height
+        }
+
+        const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, targetWidth))
+        const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, targetHeight))
 
         const s = await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -156,7 +173,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       active = false
       stopPreview()
     }
-  }, [selectedSource, isRecording])
+  }, [selectedSource, isRecording, recordingResolution])
 
   // Clean up mouse tracking subscription on unmount
   useEffect(() => {
@@ -173,8 +190,18 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       const autoZoomTrackingEnabled = autoZoomEnabled && selectedSource.id.startsWith('screen')
       const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
       captureBoundsRef.current = captureBounds
-      const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, captureBounds.width))
-      const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, captureBounds.height))
+
+      let targetWidth = captureBounds.width
+      let targetHeight = captureBounds.height
+
+      if (recordingResolution !== 'auto') {
+        const res = resolutionMap[recordingResolution]
+        targetWidth = res.width
+        targetHeight = res.height
+      }
+
+      const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, targetWidth))
+      const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, targetHeight))
 
       const displayStream = await navigator.mediaDevices.getUserMedia({
         audio: systemAudioEnabled
@@ -345,31 +372,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     displayStreamRef.current = null
     audioContextRef.current?.close()
     audioContextRef.current = null
-    micGainRef.current = null
-    systemGainRef.current = null
-    micAudioTrackRef.current = null
-    systemAudioTrackRef.current = null
   }, [])
-
-  useEffect(() => {
-    if (!isRecording) return
-    if (micGainRef.current) {
-      micGainRef.current.gain.value = micEnabled ? 1 : 0
-    }
-    if (micAudioTrackRef.current) {
-      micAudioTrackRef.current.enabled = micEnabled
-    }
-  }, [isRecording, micEnabled])
-
-  useEffect(() => {
-    if (!isRecording) return
-    if (systemGainRef.current) {
-      systemGainRef.current.gain.value = systemAudioEnabled ? 1 : 0
-    }
-    if (systemAudioTrackRef.current) {
-      systemAudioTrackRef.current.enabled = systemAudioEnabled
-    }
-  }, [isRecording, systemAudioEnabled])
 
   // Shared helper: stop the recorder, all stream tracks, audio resources, and reset state.
   // Called from error paths in startRecording and from stopRecording.
@@ -511,6 +514,32 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         <div className="w-80 flex flex-col gap-4 flex-shrink-0 overflow-y-auto">
           <div className="panel p-4 space-y-4">
             <SourceSelector selected={selectedSource} onSelect={setSelectedSource} />
+          </div>
+
+          <div className="panel p-4 space-y-4">
+            <p className="label flex items-center gap-2"><Video size={14} /> Video Settings</p>
+            <div className="space-y-2">
+              <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Recording Resolution</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(['auto', '720p', '1080p', '1440p', '4k'] as const).map((res) => (
+                  <button
+                    key={res}
+                    onClick={() => setRecordingResolution(res)}
+                    className={`px-2 py-1.5 rounded-lg border text-[10px] font-bold uppercase transition-all
+                      ${recordingResolution === res
+                        ? 'bg-accent border-accent text-white'
+                        : 'bg-bg-tertiary border-border text-text-secondary hover:border-text-muted'}`}
+                  >
+                    {res}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-text-muted leading-tight">
+                {recordingResolution === 'auto'
+                  ? 'Captures at the source\'s native resolution.'
+                  : `Captures at ${resolutionMap[recordingResolution].width}x${resolutionMap[recordingResolution].height}. Upscaling may affect quality.`}
+              </p>
+            </div>
           </div>
 
           <div className="panel p-4 space-y-4">

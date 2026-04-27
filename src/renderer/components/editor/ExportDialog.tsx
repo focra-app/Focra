@@ -25,10 +25,6 @@ type ExportFormatOption = {
 }
 
 type ZoomTransform = ReturnType<typeof getZoomTransformAtTime>
-type VideoFrameCallbackCapableVideo = HTMLVideoElement & {
-  requestVideoFrameCallback?: (callback: (now: number, metadata: { mediaTime: number }) => void) => number
-  cancelVideoFrameCallback?: (handle: number) => void
-}
 
 const FORMAT_OPTIONS: ExportFormatOption[] = [
   {
@@ -470,110 +466,106 @@ async function renderVideoWithEffects(
 ): Promise<ArrayBuffer> {
   const formatOption = getFormatOption(settings.format)
 
-  const video = document.createElement('video')
-  video.src = project.videoUrl
-  video.preload = 'auto'
-  video.muted = true
-  video.volume = 0
-  video.playsInline = true
-
-  await waitForVideoEvent(video, 'loadedmetadata')
-  const loadedVideoDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0
-  const fallbackProjectDuration = Number.isFinite(project.duration) && project.duration > 0 ? project.duration : 0
-  const mediaDuration = loadedVideoDuration || fallbackProjectDuration
-  if (mediaDuration <= 0) {
-    throw new Error('Unable to determine media duration for export')
-  }
-  const startTime = Math.max(0, Math.min(mediaDuration, project.trimPoints.inPoint))
-  const requestedEndTime = Math.min(mediaDuration, project.trimPoints.outPoint)
-  const remainingDuration = Math.max(0, mediaDuration - startTime)
-  const clampedMinDuration = Math.min(MIN_EXPORT_DURATION_SECONDS, remainingDuration)
-  const endTime = Math.min(mediaDuration, Math.max(startTime + clampedMinDuration, requestedEndTime))
-
-  const requestedDimensions = getDimensions(settings)
-  const { width, height, wasClamped } = clampOutputToSourceDimensions(
-    requestedDimensions,
-    video.videoWidth,
-    video.videoHeight
-  )
-  if (wasClamped) {
-    onProgress?.({
-      progress: 0,
-      detail: `Requested resolution exceeds source quality. Export capped to ${width}x${height} for reliability.`
-    })
+  const audioVideo = document.createElement('video')
+  const cleanupAudioVideo = () => {
+    audioVideo.pause()
+    audioVideo.removeAttribute('src')
+    audioVideo.load()
   }
 
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Unable to initialize export renderer')
-
-  await seekTo(video, startTime)
-
-  const bgImage = await loadBackgroundImage(project)
-  drawFrame(ctx, project, video, startTime, width, height, bgImage)
-
-  // `0` enables manual frame capture; frames are emitted only via requestFrame().
-  const getCanvasVideoTrackOrThrow = (
-    stream: MediaStream
-  ): CanvasCaptureMediaStreamTrack => {
-    const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
-    if (!track) {
-      throw new Error('Unable to initialize export video track')
-    }
-    return track
-  }
-
-  let canvasStream = canvas.captureStream(0)
-  const stopCanvasStreamTracks = () => {
-    canvasStream.getTracks().forEach((track) => track.stop())
-  }
-  let videoTrack: CanvasCaptureMediaStreamTrack
   try {
-    videoTrack = getCanvasVideoTrackOrThrow(canvasStream)
-  } catch (err) {
-    stopCanvasStreamTracks()
-    throw err
-  }
-  const createRequestFrameWrapper = (track: CanvasCaptureMediaStreamTrack): (() => void) | null =>
-    typeof track.requestFrame === 'function' ? () => track.requestFrame() : null
+    audioVideo.src = project.videoUrl
+    audioVideo.preload = 'auto'
+    audioVideo.muted = false
+    audioVideo.volume = 0
+    audioVideo.playsInline = true
+    await waitForVideoEvent(audioVideo, 'loadedmetadata')
+    
+    const loadedVideoDuration = Number.isFinite(audioVideo.duration) && audioVideo.duration > 0 ? audioVideo.duration : 0
+    const fallbackProjectDuration = Number.isFinite(project.duration) && project.duration > 0 ? project.duration : 0
+    const mediaDuration = loadedVideoDuration || fallbackProjectDuration
+    if (mediaDuration <= 0) {
+      throw new Error('Unable to determine media duration for export')
+    }
+    const startTime = Math.max(0, Math.min(mediaDuration, project.trimPoints.inPoint))
+    const requestedEndTime = Math.min(mediaDuration, project.trimPoints.outPoint)
+    const remainingDuration = Math.max(0, mediaDuration - startTime)
+    const clampedMinDuration = Math.min(MIN_EXPORT_DURATION_SECONDS, remainingDuration)
+    const endTime = Math.min(mediaDuration, Math.max(startTime + clampedMinDuration, requestedEndTime))
 
-  let requestFrame = createRequestFrameWrapper(videoTrack)
-  if (!requestFrame) {
-    stopCanvasStreamTracks()
-    canvasStream = canvas.captureStream(settings.fps)
+    const requestedDimensions = getDimensions(settings)
+    const { width, height, wasClamped } = clampOutputToSourceDimensions(
+      requestedDimensions,
+      audioVideo.videoWidth,
+      audioVideo.videoHeight
+    )
+    if (wasClamped) {
+      onProgress?.({
+        progress: 0,
+        detail: `Requested resolution exceeds source quality. Export capped to ${width}x${height} for reliability.`
+      })
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Unable to initialize export renderer')
+
+    await seekTo(audioVideo, startTime)
+
+    const bgImage = await loadBackgroundImage(project)
+    drawFrame(ctx, project, audioVideo, startTime, width, height, bgImage)
+
+    const getCanvasVideoTrackOrThrow = (stream: MediaStream): CanvasCaptureMediaStreamTrack => {
+      const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
+      if (!track) throw new Error('Unable to initialize export video track')
+      return track
+    }
+
+    let canvasStream = canvas.captureStream(0)
+    const stopCanvasStreamTracks = () => {
+      canvasStream.getTracks().forEach((track) => track.stop())
+    }
+    
+    let videoTrack: CanvasCaptureMediaStreamTrack
     try {
       videoTrack = getCanvasVideoTrackOrThrow(canvasStream)
     } catch (err) {
       stopCanvasStreamTracks()
       throw err
     }
-    // In fallback mode, captureStream(fps) emits frames automatically without requestFrame().
-    requestFrame = createRequestFrameWrapper(videoTrack)
-  }
 
-  let sourceAudioStream: MediaStream | null = null
-  if (typeof video.captureStream === 'function') {
-    try {
-      sourceAudioStream = video.captureStream()
-      for (const track of sourceAudioStream.getAudioTracks()) {
-        canvasStream.addTrack(track)
+    const createRequestFrameWrapper = (track: CanvasCaptureMediaStreamTrack): (() => void) | null =>
+      typeof track.requestFrame === 'function' ? () => track.requestFrame() : null
+
+    let requestFrame = createRequestFrameWrapper(videoTrack)
+    if (!requestFrame) {
+      stopCanvasStreamTracks()
+      canvasStream = canvas.captureStream(settings.fps)
+      try {
+        videoTrack = getCanvasVideoTrackOrThrow(canvasStream)
+      } catch (err) {
+        stopCanvasStreamTracks()
+        throw err
       }
-    } catch {
-      sourceAudioStream = null
-      // Continue with video-only export if audio stream capture fails.
+      requestFrame = createRequestFrameWrapper(videoTrack)
     }
-  }
 
-  let mimeType: string
-  let recorder: MediaRecorder
-  try {
-    const selectedMimeType = chooseMimeTypeForCanvasStream(formatOption, canvasStream)
-    if (!selectedMimeType) {
-      throw new Error(`${formatOption.label} export is not supported for the current stream`)
+    if (typeof audioVideo.captureStream === 'function') {
+      try {
+        const audioStream = audioVideo.captureStream()
+        for (const track of audioStream.getAudioTracks()) {
+          canvasStream.addTrack(track)
+        }
+      } catch {
+        // Continue with video-only export if audio stream capture fails.
+      }
     }
-    mimeType = selectedMimeType
+
+    const selectedMimeType = chooseMimeTypeForCanvasStream(formatOption, canvasStream)
+    if (!selectedMimeType) throw new Error(`${formatOption.label} export is not supported`)
+    const mimeType = selectedMimeType
 
     const pixelRate = width * height * settings.fps
     const videoBitsPerSecond = Math.min(
@@ -581,195 +573,125 @@ async function renderVideoWithEffects(
       Math.max(MIN_EXPORT_BITRATE, Math.round(pixelRate * EXPORT_BITS_PER_PIXEL_PER_FRAME))
     )
 
-    recorder = new MediaRecorder(canvasStream, {
+    const recorder = new MediaRecorder(canvasStream, {
       mimeType,
       videoBitsPerSecond
     })
-  } catch (err) {
-    sourceAudioStream?.getTracks().forEach((track) => track.stop())
-    stopCanvasStreamTracks()
-    throw err
-  }
 
-  const recordedChunks: Blob[] = []
-  const exportBufferPromise = new Promise<ArrayBuffer>((resolve, reject) => {
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        recordedChunks.push(event.data)
+    const recordedChunks: Blob[] = []
+    const exportBufferPromise = new Promise<ArrayBuffer>((resolve, reject) => {
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordedChunks.push(event.data)
       }
-    }
-
-    recorder.onerror = () => {
-      reject(new Error('Export recording failed'))
-    }
-
-    recorder.onstop = async () => {
-      stopCanvasStreamTracks()
-      try {
-        const blob = new Blob(recordedChunks, { type: mimeType })
-        resolve(await blob.arrayBuffer())
-      } catch (err) {
-        reject(new Error(`Export recording failed: ${String(err)}`))
-      }
-    }
-  })
-
-  let recorderStarted = false
-  let capturedRenderError: unknown = null
-
-  try {
-    recorder.start(RECORDER_TIMESLICE_MS)
-    recorderStarted = true
-
-    const frameDurationMs = 1000 / settings.fps
-    const totalExportDuration = Math.max(END_FRAME_EPSILON_SECONDS, endTime - startTime)
-    const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
-    const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
-    let nextAnnotationIndex = 0
-    let visibleAnnotations: EditorProject['annotations'] = []
-    let lastReportedProgress = -1
-    onProgress?.({ progress: 0 })
-
-    const renderExportFrame = (renderTime: number) => {
-      const clampedTime = Math.max(startTime, Math.min(endTime, renderTime))
-      const annotationUpdate = computeVisibleAnnotationsForTime(
-        sortedAnnotations,
-        visibleAnnotations,
-        nextAnnotationIndex,
-        clampedTime
-      )
-      nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
-      visibleAnnotations = annotationUpdate.visibleAnnotations
-      drawFrame(ctx, project, video, clampedTime, width, height, bgImage, {
-        zoomTransform: getSequentialZoomTransform(clampedTime),
-        visibleAnnotations
-      })
-      // requestFrame is only available in manual captureStream(0) mode.
-      requestFrame?.()
-    }
-
-    renderExportFrame(startTime)
-    const frameCallbackVideo = video as VideoFrameCallbackCapableVideo
-    await new Promise<void>((resolve, reject) => {
-      let frameCallbackId: number | null = null
-      let timeoutId: ReturnType<typeof window.setTimeout> | null = null
-      let settled = false
-      let stagnantFrameCount = 0
-      let previousRenderTime = startTime
-
-      const cleanup = () => {
-        video.removeEventListener('error', onPlaybackError)
-        if (frameCallbackId !== null && frameCallbackVideo.cancelVideoFrameCallback) {
-          frameCallbackVideo.cancelVideoFrameCallback(frameCallbackId)
-          frameCallbackId = null
-        }
-        if (timeoutId !== null) {
-          window.clearTimeout(timeoutId)
-          timeoutId = null
+      recorder.onerror = () => reject(new Error('Export recording failed'))
+      recorder.onstop = async () => {
+        stopCanvasStreamTracks()
+        try {
+          const blob = new Blob(recordedChunks, { type: mimeType })
+          resolve(await blob.arrayBuffer())
+        } catch (err) {
+          reject(new Error(`Export recording failed: ${String(err)}`))
         }
       }
-
-      const finish = () => {
-        if (settled) return
-        settled = true
-        cleanup()
-        resolve()
-      }
-
-      const fail = (err: unknown) => {
-        if (settled) return
-        settled = true
-        cleanup()
-        reject(err instanceof Error ? err : new Error(String(err)))
-      }
-
-      const onPlaybackError = () => {
-        fail(new Error('Video playback failed during export'))
-      }
-
-      const scheduleNextFrame = () => {
-        if (frameCallbackVideo.requestVideoFrameCallback) {
-          frameCallbackId = frameCallbackVideo.requestVideoFrameCallback(() => {
-            renderNextFrame()
-          })
-          return
-        }
-        timeoutId = window.setTimeout(() => {
-          renderNextFrame()
-        }, frameDurationMs)
-      }
-
-      const renderNextFrame = () => {
-        const renderTime = Math.max(startTime, Math.min(endTime, video.currentTime))
-        renderExportFrame(renderTime)
-        const progress = Math.max(0, Math.min(1, (renderTime - startTime) / totalExportDuration))
-        if (progress - lastReportedProgress >= 0.01 || progress >= 1) {
-          lastReportedProgress = progress
-          onProgress?.({ progress })
-        }
-
-        if (Math.abs(renderTime - previousRenderTime) <= END_FRAME_EPSILON_SECONDS) {
-          stagnantFrameCount += 1
-        } else {
-          stagnantFrameCount = 0
-          previousRenderTime = renderTime
-        }
-
-        if (stagnantFrameCount > settings.fps * 2) {
-          fail(new Error('Export playback stalled before reaching the trim end point'))
-          return
-        }
-
-        if (renderTime >= endTime - END_FRAME_EPSILON_SECONDS || video.ended) {
-          video.pause()
-          finish()
-          return
-        }
-        scheduleNextFrame()
-      }
-
-      video.addEventListener('error', onPlaybackError, { once: true })
-      void video.play()
-        .then(() => {
-          scheduleNextFrame()
-        })
-        .catch((err) => {
-          fail(new Error(`Export playback failed to start: ${String(err)}`))
-        })
     })
 
-    if (video.currentTime < endTime - END_FRAME_EPSILON_SECONDS) {
-      await seekTo(video, endTime)
-    }
-    renderExportFrame(endTime)
-    video.pause()
+    let recorderStarted = false
+    let capturedRenderError: unknown = null
 
-    onProgress?.({ progress: 1 })
-  } catch (err) {
-    capturedRenderError = err
-  } finally {
-    sourceAudioStream?.getTracks().forEach((track) => track.stop())
-    video.pause()
-    video.removeAttribute('src')
-    video.load()
-    if (recorderStarted && recorder.state !== 'inactive') {
-      recorder.stop()
-    }
-    stopCanvasStreamTracks()
-  }
+    try {
+      recorder.start(RECORDER_TIMESLICE_MS)
+      recorderStarted = true
 
-  if (capturedRenderError) {
-    if (recorderStarted) {
+      const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
+      const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
+      let nextAnnotationIndex = 0
+      let visibleAnnotations: EditorProject['annotations'] = []
+      let lastReportedProgress = -1
+      onProgress?.({ progress: 0 })
+
       try {
-        await exportBufferPromise
+        await audioVideo.play()
       } catch (err) {
-        console.warn('Failed to complete export buffer promise during error cleanup (expected)', err)
+        console.warn('Export audio playback could not start', err)
       }
-    }
-    throw capturedRenderError
-  }
 
-  return exportBufferPromise
+      const exportStartWallClock = performance.now()
+      const totalExportDuration = Math.max(END_FRAME_EPSILON_SECONDS, endTime - startTime)
+      const exportDurationMs = totalExportDuration * 1000
+
+      await new Promise<void>((resolve, reject) => {
+        const checkEnd = () => {
+          const elapsed = performance.now() - exportStartWallClock
+          if (elapsed >= exportDurationMs || audioVideo.ended || audioVideo.currentTime >= endTime - END_FRAME_EPSILON_SECONDS) {
+            if (recorder.state !== 'inactive') recorder.stop()
+            onProgress?.({ progress: 1 })
+            resolve()
+            return true
+          }
+          return false
+        }
+
+        const processFrame = () => {
+          if (checkEnd()) return
+
+          const renderTime = audioVideo.currentTime
+          const progress = Math.max(0, Math.min(1, (renderTime - startTime) / totalExportDuration))
+          if (progress - lastReportedProgress >= 0.01 || progress >= 1) {
+            lastReportedProgress = progress
+            onProgress?.({ progress })
+          }
+
+          const annotationUpdate = computeVisibleAnnotationsForTime(
+            sortedAnnotations,
+            visibleAnnotations,
+            nextAnnotationIndex,
+            renderTime
+          )
+          nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
+          visibleAnnotations = annotationUpdate.visibleAnnotations
+
+          drawFrame(ctx, project, audioVideo, renderTime, width, height, bgImage, {
+            zoomTransform: getSequentialZoomTransform(renderTime),
+            visibleAnnotations
+          })
+          requestFrame?.()
+
+          if ('requestVideoFrameCallback' in audioVideo) {
+            (audioVideo as any).requestVideoFrameCallback(processFrame)
+          } else {
+            requestAnimationFrame(processFrame)
+          }
+        }
+
+        if ('requestVideoFrameCallback' in audioVideo) {
+          (audioVideo as any).requestVideoFrameCallback(processFrame)
+        } else {
+          requestAnimationFrame(processFrame)
+        }
+
+        setTimeout(() => {
+          if (recorder.state !== 'inactive') recorder.stop()
+          resolve()
+        }, exportDurationMs + 30000)
+      })
+    } catch (err) {
+      capturedRenderError = err
+    } finally {
+      cleanupAudioVideo()
+      if (recorderStarted && recorder.state !== 'inactive') recorder.stop()
+      stopCanvasStreamTracks()
+    }
+
+    if (capturedRenderError) {
+      try { await exportBufferPromise } catch { /* ignore */ }
+      throw capturedRenderError
+    }
+
+    return exportBufferPromise
+  } catch (err) {
+    cleanupAudioVideo()
+    throw err
+  }
 }
 
 export default function ExportDialog({ onClose }: ExportDialogProps) {
