@@ -620,23 +620,37 @@ async function renderVideoWithEffects(
       const exportDurationMs = totalExportDuration * 1000
 
       await new Promise<void>((resolve, reject) => {
+        let isFinishing = false
+
+        const finish = async () => {
+          if (isFinishing) return
+          isFinishing = true
+          
+          // Small delay to let the recorder catch the last few frames/audio chunks
+          await new Promise(r => setTimeout(r, 200))
+          
+          if (recorder.state !== 'inactive') {
+            recorder.stop()
+          }
+          onProgress?.({ progress: 1 })
+          resolve()
+        }
+
         const checkEnd = () => {
-          const elapsed = performance.now() - exportStartWallClock
-          if (elapsed >= exportDurationMs || audioVideo.ended || audioVideo.currentTime >= endTime - END_FRAME_EPSILON_SECONDS) {
-            if (recorder.state !== 'inactive') recorder.stop()
-            onProgress?.({ progress: 1 })
-            resolve()
+          if (audioVideo.ended || audioVideo.currentTime >= endTime - END_FRAME_EPSILON_SECONDS) {
+            finish()
             return true
           }
           return false
         }
 
         const processFrame = () => {
+          if (isFinishing) return
           if (checkEnd()) return
 
           const renderTime = audioVideo.currentTime
-          const progress = Math.max(0, Math.min(1, (renderTime - startTime) / totalExportDuration))
-          if (progress - lastReportedProgress >= 0.01 || progress >= 1) {
+          const progress = Math.max(0, Math.min(0.99, (renderTime - startTime) / totalExportDuration))
+          if (progress - lastReportedProgress >= 0.01) {
             lastReportedProgress = progress
             onProgress?.({ progress })
           }
@@ -663,16 +677,22 @@ async function renderVideoWithEffects(
           }
         }
 
+        audioVideo.onended = finish
+        audioVideo.onerror = (_e) => reject(new Error('Playback error during export'))
+
         if ('requestVideoFrameCallback' in audioVideo) {
           (audioVideo as any).requestVideoFrameCallback(processFrame)
         } else {
           requestAnimationFrame(processFrame)
         }
 
+        // Safety timeout (duration + 60s) in case the video gets stuck
         setTimeout(() => {
-          if (recorder.state !== 'inactive') recorder.stop()
-          resolve()
-        }, exportDurationMs + 30000)
+          if (!isFinishing) {
+            console.warn('Export safety timeout reached')
+            finish()
+          }
+        }, exportDurationMs + 60000)
       })
     } catch (err) {
       capturedRenderError = err

@@ -511,30 +511,30 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       <div className="flex flex-1 gap-4 p-4 pt-0 overflow-hidden">
         {/* Left panel: settings */}
-        <div className="w-80 flex flex-col gap-4 flex-shrink-0 overflow-y-auto">
-          <div className="panel p-4 space-y-4">
+        <div className="w-80 flex flex-col gap-3 flex-shrink-0 overflow-y-auto pr-1">
+          <div className="panel p-3.5 space-y-3">
             <SourceSelector selected={selectedSource} onSelect={setSelectedSource} />
           </div>
 
-          <div className="panel p-4 space-y-4">
+          <div className="panel p-3.5 space-y-3">
             <p className="label flex items-center gap-2"><Video size={14} /> Video Settings</p>
             <div className="space-y-2">
-              <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">Recording Resolution</span>
-              <div className="grid grid-cols-3 gap-1.5">
+              <span className="text-[10px] font-bold text-text-secondary uppercase tracking-wider opacity-80">Recording Resolution</span>
+              <div className="grid grid-cols-5 gap-1">
                 {(['auto', '720p', '1080p', '1440p', '4k'] as const).map((res) => (
                   <button
                     key={res}
                     onClick={() => setRecordingResolution(res)}
-                    className={`px-2 py-1.5 rounded-lg border text-[10px] font-bold uppercase transition-all
+                    className={`px-1 py-1.5 rounded-md border text-[9px] font-bold uppercase transition-all
                       ${recordingResolution === res
-                        ? 'bg-accent border-accent text-white'
+                        ? 'bg-accent border-accent text-white shadow-sm'
                         : 'bg-bg-tertiary border-border text-text-secondary hover:border-text-muted'}`}
                   >
                     {res}
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-text-muted leading-tight">
+              <p className="text-[9px] text-text-muted leading-tight opacity-80">
                 {recordingResolution === 'auto'
                   ? 'Captures at the source\'s native resolution.'
                   : `Captures at ${resolutionMap[recordingResolution].width}x${resolutionMap[recordingResolution].height}. Upscaling may affect quality.`}
@@ -542,7 +542,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             </div>
           </div>
 
-          <div className="panel p-4 space-y-4">
+          <div className="panel p-3.5 space-y-3">
             <p className="label flex items-center gap-2"><Mic size={14} /> Audio Settings</p>
 
             <div className="flex items-center justify-between">
@@ -570,7 +570,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             </div>
           </div>
 
-          <div className="panel p-4 space-y-4">
+          <div className="panel p-3.5 space-y-3">
             <p className="label flex items-center gap-2"><Zap size={14} /> Auto-Zoom</p>
 
             <div className="flex items-center justify-between">
@@ -583,10 +583,10 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             </div>
 
             {autoZoomEnabled && (
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="label mb-0">Sensitivity</span>
-                  <span className="text-xs text-text-secondary">{Math.round(autoZoomSensitivity * 100)}%</span>
+                  <span className="text-xs text-text-secondary font-mono">{Math.round(autoZoomSensitivity * 100)}%</span>
                 </div>
                 <input
                   type="range"
@@ -595,9 +595,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
                   step={0.05}
                   value={autoZoomSensitivity}
                   onChange={(e) => setAutoZoomSensitivity(parseFloat(e.target.value))}
-                  className="w-full accent-accent cursor-pointer"
+                  className="w-full h-1.5 bg-bg-tertiary rounded-lg appearance-none cursor-pointer accent-accent"
                 />
-                <p className="text-xs text-text-muted">Higher = more zoom events detected</p>
               </div>
             )}
           </div>
