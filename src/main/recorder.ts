@@ -1,9 +1,9 @@
 import { desktopCapturer, screen } from 'electron'
 import { writeFile } from 'fs/promises'
 
-const BASE_SOURCE_THUMBNAIL_WIDTH = 320
-const BASE_SOURCE_THUMBNAIL_HEIGHT = 180
-const MAX_SOURCE_THUMBNAIL_SCALE_FACTOR = 2
+const BASE_SOURCE_THUMBNAIL_WIDTH = 640
+const BASE_SOURCE_THUMBNAIL_HEIGHT = 360
+const MAX_SOURCE_THUMBNAIL_SCALE_FACTOR = 3
 
 function getSourceThumbnailSize() {
   const maxScaleFactor = screen.getAllDisplays().reduce((maxScale, display) => {
