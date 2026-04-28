@@ -11,8 +11,13 @@ export default function RecordingPreview({ source, stream, isRecording }: Record
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream
+    if (videoRef.current) {
+      if (stream) {
+        videoRef.current.srcObject = stream
+        videoRef.current.play().catch(e => console.error("Preview play failed:", e))
+      } else {
+        videoRef.current.srcObject = null
+      }
     }
   }, [stream])
 

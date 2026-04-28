@@ -155,7 +155,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       active = false
       stopPreview()
     }
-  }, [selectedSource, isRecording, recordingResolution])
+  }, [selectedSource, isRecording])
 
   // Clean up mouse tracking subscription on unmount
   useEffect(() => {
@@ -183,10 +183,10 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           mandatory: {
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: selectedSource.id,
-          },
-          width: { ideal: clampedWidth },
-          height: { ideal: clampedHeight },
-          frameRate: { ideal: 30, max: 60 }
+            maxWidth: clampedWidth,
+            maxHeight: clampedHeight,
+            maxFrameRate: 60
+          }
         } as any
       })
       const videoTrack = displayStream.getVideoTracks()[0]
@@ -478,31 +478,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             <SourceSelector selected={selectedSource} onSelect={setSelectedSource} />
           </div>
 
-          <div className="panel p-3.5 space-y-3">
-            <p className="label flex items-center gap-2"><Video size={14} /> Video Settings</p>
-            <div className="space-y-2">
-              <span className="text-[10px] font-bold text-text-secondary uppercase tracking-wider opacity-80">Recording Resolution</span>
-              <div className="grid grid-cols-5 gap-1">
-                {(['auto', '720p', '1080p', '1440p', '4k'] as const).map((res) => (
-                  <button
-                    key={res}
-                    onClick={() => setRecordingResolution(res)}
-                    className={`px-1 py-1.5 rounded-md border text-[9px] font-bold uppercase transition-all
-                      ${recordingResolution === res
-                        ? 'bg-accent border-accent text-white shadow-sm'
-                        : 'bg-bg-tertiary border-border text-text-secondary hover:border-text-muted'}`}
-                  >
-                    {res}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[9px] text-text-muted leading-tight opacity-80">
-                {recordingResolution === 'auto'
-                  ? 'Captures at the source\'s native resolution.'
-                  : `Captures at ${resolutionMap[recordingResolution].width}x${resolutionMap[recordingResolution].height}. Upscaling may affect quality.`}
-              </p>
-            </div>
-          </div>
+
 
           <div className="panel p-3.5 space-y-3">
             <p className="label flex items-center gap-2"><Mic size={14} /> Audio Settings</p>
