@@ -1,3 +1,5 @@
+import { FFmpeg } from '@ffmpeg/ffmpeg'
+import { fetchFile } from '@ffmpeg/util'
 import { useState } from 'react'
 import { Download, X, Check } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
@@ -621,10 +623,12 @@ async function renderVideoWithEffects(
 
       await new Promise<void>((resolve, reject) => {
         let isFinishing = false
+        let intervalId: ReturnType<typeof setInterval>
 
         const finish = async () => {
           if (isFinishing) return
           isFinishing = true
+          clearInterval(intervalId)
           
           // Small delay to let the recorder catch the last few frames/audio chunks
           await new Promise(r => setTimeout(r, 200))
@@ -669,22 +673,13 @@ async function renderVideoWithEffects(
             visibleAnnotations
           })
           requestFrame?.()
-
-          if ('requestVideoFrameCallback' in audioVideo) {
-            (audioVideo as any).requestVideoFrameCallback(processFrame)
-          } else {
-            requestAnimationFrame(processFrame)
-          }
         }
 
         audioVideo.onended = finish
         audioVideo.onerror = (_e) => reject(new Error('Playback error during export'))
 
-        if ('requestVideoFrameCallback' in audioVideo) {
-          (audioVideo as any).requestVideoFrameCallback(processFrame)
-        } else {
-          requestAnimationFrame(processFrame)
-        }
+        const frameIntervalMs = 1000 / settings.fps
+        intervalId = setInterval(processFrame, frameIntervalMs)
 
         // Safety timeout (duration + 60s) in case the video gets stuck
         setTimeout(() => {
@@ -749,23 +744,6 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         update({ format: filteredOption.value })
       }
 
-      const result = await window.electronAPI.showSaveDialog({
-        defaultName: `focra-export.${filteredOption.extension}`,
-        filters: [
-          { name: `${filteredOption.label} Video`, extensions: [filteredOption.extension] },
-          { name: 'All Files', extensions: ['*'] }
-        ]
-      })
-
-      if (result.canceled || !result.saveToken) {
-        if (result.error) {
-          console.error('Save dialog failed', result.error)
-          throw new Error('Failed to open save dialog. Please verify export format configuration.')
-        }
-        setExporting(false)
-        return
-      }
-
       const exportedBuffer = await renderVideoWithEffects(
         project,
         { ...settings, format: filteredOption.value },
@@ -774,10 +752,40 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
           if (detail) setExportDetail(detail)
         }
       )
-      const saveResult = await window.electronAPI.saveFile(result.saveToken, exportedBuffer)
-      if (!saveResult.success) {
-        throw new Error(saveResult.error ?? 'Failed to save exported file')
+
+      const mimeType = filteredOption.mimeTypes[0] || 'video/webm'
+      let finalBlob = new Blob([exportedBuffer], { type: mimeType })
+      let finalExtension = filteredOption.extension
+
+      if (filteredOption.value === 'mp4' && mimeType.includes('webm')) {
+        setExportDetail('Remuxing WebM to MP4... This may take a moment.')
+        try {
+          const ffmpeg = new FFmpeg()
+          await ffmpeg.load()
+          await ffmpeg.writeFile('input.webm', await fetchFile(finalBlob))
+          await ffmpeg.exec(['-i', 'input.webm', '-c', 'copy', 'output.mp4'])
+          const data = await ffmpeg.readFile('output.mp4')
+          finalBlob = new Blob([data], { type: 'video/mp4' })
+          finalExtension = 'mp4'
+        } catch (e) {
+          console.error('MP4 Remux failed, saving as WebM fallback.', e)
+          setExportDetail('MP4 conversion failed, falling back to WebM.')
+          finalExtension = 'webm'
+        }
       }
+
+      const url = URL.createObjectURL(finalBlob)
+      const a = document.createElement('a')
+      a.style.display = 'none'
+      a.href = url
+      a.download = `focra-export.${finalExtension}`
+      document.body.appendChild(a)
+      a.click()
+      
+      setTimeout(() => {
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }, 100)
 
       setDone(true)
     } catch (err) {

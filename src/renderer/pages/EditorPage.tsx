@@ -40,7 +40,9 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
         resolution: '1080p',
         format: 'webm',
         fps: 60
-      }
+      },
+      captureWidth: result.captureWidth,
+      captureHeight: result.captureHeight
     })
   }, [result])
 

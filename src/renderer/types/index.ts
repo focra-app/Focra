@@ -63,6 +63,8 @@ export interface EditorProject {
   background: Background
   cropSettings: CropSettings | null
   exportSettings: ExportSettings
+  captureWidth?: number
+  captureHeight?: number
 }
 
 export interface DesktopSource {
@@ -85,6 +87,8 @@ export interface RecordingResult {
   videoBlob: Blob
   duration: number
   zoomKeyframes: ZoomKeyframe[]
+  captureWidth: number
+  captureHeight: number
 }
 
 export type Tool = 'select' | 'text' | 'arrow' | 'crop'

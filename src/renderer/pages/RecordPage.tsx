@@ -78,13 +78,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const [error, setError] = useState<string | null>(null)
   const [logoLoadFailed, setLogoLoadFailed] = useState(false)
 
-  const resolutionMap: Record<string, { width: number; height: number }> = {
-    '720p': { width: 1280, height: 720 },
-    '1080p': { width: 1920, height: 1080 },
-    '1440p': { width: 2560, height: 1440 },
-    '4k': { width: 3840, height: 2160 }
-  }
-
+  
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const mouseEventsRef = useRef<MouseEventData[]>([])
@@ -94,9 +88,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   // Refs for proper cleanup of mic mixing resources
   const micStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
-  const micGainRef = useRef<GainNode | null>(null)
-  const systemGainRef = useRef<GainNode | null>(null)
-  const micAudioTrackRef = useRef<MediaStreamTrack | null>(null)
+    const micAudioTrackRef = useRef<MediaStreamTrack | null>(null)
   const systemAudioTrackRef = useRef<MediaStreamTrack | null>(null)
   // Keep ref to the raw display stream so its audio tracks can be stopped on cleanup
   const displayStreamRef = useRef<MediaStream | null>(null)
@@ -129,17 +121,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
         if (!active || isRecording) return
 
-        let targetWidth = captureBounds.width
-        let targetHeight = captureBounds.height
-
-        if (recordingResolution !== 'auto') {
-          const res = resolutionMap[recordingResolution]
-          targetWidth = res.width
-          targetHeight = res.height
-        }
-
-        const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, targetWidth))
-        const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, targetHeight))
+        const clampedWidth = captureBounds.width; const clampedHeight = captureBounds.height;
 
         const s = await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -147,12 +129,12 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             mandatory: {
               chromeMediaSource: 'desktop',
               chromeMediaSourceId: selectedSource.id,
-              maxWidth: clampedWidth,
-              maxHeight: clampedHeight,
-              maxFrameRate: TARGET_FRAME_RATE
-            }
-          }
-        } as any)
+            },
+            width: { ideal: clampedWidth },
+            height: { ideal: clampedHeight },
+            frameRate: { ideal: 30, max: 60 }
+          } as any
+        })
 
         if (active && !isRecording) {
           stopPreview()
@@ -191,17 +173,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
       captureBoundsRef.current = captureBounds
 
-      let targetWidth = captureBounds.width
-      let targetHeight = captureBounds.height
-
-      if (recordingResolution !== 'auto') {
-        const res = resolutionMap[recordingResolution]
-        targetWidth = res.width
-        targetHeight = res.height
-      }
-
-      const clampedWidth = Math.max(MIN_CAPTURE_WIDTH, Math.min(MAX_CAPTURE_WIDTH, targetWidth))
-      const clampedHeight = Math.max(MIN_CAPTURE_HEIGHT, Math.min(MAX_CAPTURE_HEIGHT, targetHeight))
+      const clampedWidth = captureBounds.width; const clampedHeight = captureBounds.height;
 
       const displayStream = await navigator.mediaDevices.getUserMedia({
         audio: systemAudioEnabled
@@ -211,11 +183,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           mandatory: {
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: selectedSource.id,
-            maxWidth: clampedWidth,
-            maxHeight: clampedHeight,
-            maxFrameRate: TARGET_FRAME_RATE
-          }
-        }
+          },
+          width: { ideal: clampedWidth },
+          height: { ideal: clampedHeight },
+          frameRate: { ideal: 30, max: 60 }
+        } as any
       })
       const videoTrack = displayStream.getVideoTracks()[0]
       if (!videoTrack) {
@@ -234,9 +206,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       let combinedStream = displayStream
       micStreamRef.current = null
       audioContextRef.current = null
-      micGainRef.current = null
-      systemGainRef.current = null
-      micAudioTrackRef.current = null
+            micAudioTrackRef.current = null
       systemAudioTrackRef.current = null
       displayStreamRef.current = displayStream
 
@@ -270,20 +240,12 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
         if (systemTrack) {
           const sysSource = audioContext.createMediaStreamSource(new MediaStream([systemTrack]))
-          const sysGain = audioContext.createGain()
-          sysGain.gain.value = systemAudioEnabled ? 1 : 0
-          sysSource.connect(sysGain)
-          sysGain.connect(dest)
-          systemGainRef.current = sysGain
+          sysSource.connect(dest)
         }
 
         if (micTrack) {
           const micSource = audioContext.createMediaStreamSource(new MediaStream([micTrack]))
-          const micGain = audioContext.createGain()
-          micGain.gain.value = micEnabled ? 1 : 0
-          micSource.connect(micGain)
-          micGain.connect(dest)
-          micGainRef.current = micGain
+          micSource.connect(dest)
         }
 
         audioContextRef.current = audioContext
@@ -455,7 +417,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         }
       }
 
-      onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes })
+      onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth: clampedWidth, captureHeight: clampedHeight })
 
       cancelRecordingResources()
     }
@@ -553,7 +515,16 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
               <ToggleSwitch
                 enabled={micEnabled}
                 label="Microphone"
-                onToggle={() => setMicEnabled((prev) => !prev)}
+                onToggle={() => {
+                  if (mediaRecorderRef.current && (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused')) {
+                    if (micAudioTrackRef.current) {
+                      micAudioTrackRef.current.enabled = !micAudioTrackRef.current.enabled;
+                      setMicEnabled(micAudioTrackRef.current.enabled);
+                    }
+                  } else {
+                    setMicEnabled(prev => !prev);
+                  }
+                }}
               />
             </div>
 
@@ -565,7 +536,16 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
               <ToggleSwitch
                 enabled={systemAudioEnabled}
                 label="System Audio"
-                onToggle={() => setSystemAudioEnabled((prev) => !prev)}
+                onToggle={() => {
+                  if (mediaRecorderRef.current && (mediaRecorderRef.current.state === 'recording' || mediaRecorderRef.current.state === 'paused')) {
+                    if (systemAudioTrackRef.current) {
+                      systemAudioTrackRef.current.enabled = !systemAudioTrackRef.current.enabled;
+                      setSystemAudioEnabled(systemAudioTrackRef.current.enabled);
+                    }
+                  } else {
+                    setSystemAudioEnabled(prev => !prev);
+                  }
+                }}
               />
             </div>
           </div>
