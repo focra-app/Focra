@@ -789,6 +789,9 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         ]
       })
 
+      if (dialogResult.error) {
+        throw new Error(dialogResult.error)
+      }
       if (dialogResult.canceled || !dialogResult.saveToken) {
         setExportDetail('Export canceled.')
         return
