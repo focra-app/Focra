@@ -22,6 +22,7 @@ const MIN_VIDEO_BITRATE = 8_000_000
 const MAX_VIDEO_BITRATE = 45_000_000
 const VIDEO_BITS_PER_PIXEL_PER_FRAME = 0.1
 const AUDIO_BITRATE = 128_000
+const MIN_CAPTURE_DIMENSION = 64
 const TOGGLE_WIDTH = 44
 const TOGGLE_HEIGHT = 24
 const TOGGLE_EDGE_OFFSET = 4
@@ -98,6 +99,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const pausedDurationRef = useRef<number>(0)  // accumulated paused ms
   const pauseStartRef = useRef<number>(0)       // timestamp of current pause start
   const captureBoundsRef = useRef<CaptureBounds | null>(null)
+  const recordingDimensionsRef = useRef<{ width: number; height: number } | null>(null)
+  const finalizePromiseRef = useRef<Promise<void> | null>(null)
 
   // High-quality preview stream when a source is selected
   useEffect(() => {
@@ -170,33 +173,58 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
     try {
       const autoZoomTrackingEnabled = autoZoomEnabled && selectedSource.id.startsWith('screen')
+      finalizePromiseRef.current = null
       const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
       captureBoundsRef.current = captureBounds
 
-      const clampedWidth = captureBounds.width; const clampedHeight = captureBounds.height;
+      const clampedWidth = captureBounds.width
+      const clampedHeight = captureBounds.height
 
-      const displayStream = await navigator.mediaDevices.getUserMedia({
-        audio: systemAudioEnabled
-          ? { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id } }
-          : false,
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: selectedSource.id,
-            maxWidth: clampedWidth,
-            maxHeight: clampedHeight,
-            maxFrameRate: 60
-          }
-        } as any
-      })
+      const videoConstraints = {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: selectedSource.id
+        },
+        width: { ideal: clampedWidth },
+        height: { ideal: clampedHeight },
+        frameRate: { ideal: 30, max: 60 }
+      } as any
+
+      let displayStream: MediaStream
+      try {
+        displayStream = await navigator.mediaDevices.getUserMedia({
+          audio: systemAudioEnabled
+            ? { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id } }
+            : false,
+          video: videoConstraints
+        })
+      } catch (audioError) {
+        if (systemAudioEnabled) {
+          console.warn('System audio capture failed, retrying without system audio.', audioError)
+          displayStream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: videoConstraints
+          })
+          setSystemAudioEnabled(false)
+          setError('System audio unavailable. Recording video only. Check audio permissions.')
+        } else {
+          throw audioError
+        }
+      }
+
+      displayStreamRef.current = displayStream
+
       const videoTrack = displayStream.getVideoTracks()[0]
       if (!videoTrack) {
+        displayStream.getTracks().forEach((track) => track.stop())
+        displayStreamRef.current = null
         throw new Error('Unable to start recording: no video track was returned for the selected source.')
       }
       const trackSettings = videoTrack.getSettings()
-      const resolvedWidth = Math.max(1, Math.round(trackSettings?.width ?? clampedWidth))
-      const resolvedHeight = Math.max(1, Math.round(trackSettings?.height ?? clampedHeight))
+      const resolvedWidth = Math.max(MIN_CAPTURE_DIMENSION, Math.round(trackSettings?.width ?? clampedWidth))
+      const resolvedHeight = Math.max(MIN_CAPTURE_DIMENSION, Math.round(trackSettings?.height ?? clampedHeight))
       const resolvedFrameRate = Math.max(1, Math.round(trackSettings?.frameRate ?? TARGET_FRAME_RATE))
+      recordingDimensionsRef.current = { width: resolvedWidth, height: resolvedHeight }
       const pixelRate = resolvedWidth * resolvedHeight * resolvedFrameRate
       const videoBitsPerSecond = Math.min(
         MAX_VIDEO_BITRATE,
@@ -206,9 +234,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       let combinedStream = displayStream
       micStreamRef.current = null
       audioContextRef.current = null
-            micAudioTrackRef.current = null
+      micAudioTrackRef.current = null
       systemAudioTrackRef.current = null
-      displayStreamRef.current = displayStream
 
       if (!systemAudioEnabled) {
         // Some desktop-capture setups may still return an audio track despite audio:false.
@@ -321,6 +348,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         setElapsedTime((t) => t + 1)
       }, 1000)
     } catch (err) {
+      cancelRecordingResources()
       setError(`Failed to start recording: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
@@ -357,6 +385,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     pausedDurationRef.current = 0
     pauseStartRef.current = 0
     captureBoundsRef.current = null
+    recordingDimensionsRef.current = null
     cleanupAudio()
     setStream(null)
     setIsRecording(false)
@@ -364,66 +393,101 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   }, [cleanupAudio])
 
   const stopRecording = () => {
-    if (!mediaRecorderRef.current) return
+    const recorder = mediaRecorderRef.current
+    if (!recorder) return
 
     // Stop global mouse tracking immediately
     window.electronAPI.stopMouseTracking()
     unsubscribeMouseClickRef.current?.()
     unsubscribeMouseClickRef.current = null
 
-    mediaRecorderRef.current.onstop = async () => {
-      // Compute active recording time, excluding any time spent paused
-      const totalElapsed = Date.now() - startTimeRef.current
-      // If the recording was paused when stop() was called, count that segment too
-      const finalPausedMs =
-        pauseStartRef.current > 0
-          ? pausedDurationRef.current + (Date.now() - pauseStartRef.current)
-          : pausedDurationRef.current
-      const duration = (totalElapsed - finalPausedMs) / 1000
-      const blob = new Blob(chunksRef.current, { type: 'video/webm' })
-      const videoUrl = URL.createObjectURL(blob)
-
-      let zoomKeyframes: ZoomKeyframe[] = []
-      if (autoZoomEnabled && mouseEventsRef.current.length > 0) {
+    const finalizeRecording = async () => {
+      if (finalizePromiseRef.current) return finalizePromiseRef.current
+      finalizePromiseRef.current = (async () => {
         try {
+          if (chunksRef.current.length === 0) {
+            setError('No recording data captured. Please try recording again.')
+            cancelRecordingResources()
+            return
+          }
+
+          // Compute active recording time, excluding any time spent paused
+          const totalElapsed = Date.now() - startTimeRef.current
+          // If the recording was paused when stop() was called, count that segment too
+          const finalPausedMs =
+            pauseStartRef.current > 0
+              ? pausedDurationRef.current + (Date.now() - pauseStartRef.current)
+              : pausedDurationRef.current
+          const duration = (totalElapsed - finalPausedMs) / 1000
+          const blob = new Blob(chunksRef.current, { type: 'video/webm' })
+          const videoUrl = URL.createObjectURL(blob)
+
+          let zoomKeyframes: ZoomKeyframe[] = []
+          if (autoZoomEnabled && mouseEventsRef.current.length > 0) {
+            try {
+              const captureBounds = captureBoundsRef.current
+              if (!captureBounds) throw new Error('Missing capture bounds for auto-zoom generation')
+              const rawKfs = await window.electronAPI.generateZoomKeyframes(
+                mouseEventsRef.current,
+                duration,
+                captureBounds
+              )
+              const normalizedSensitivity = Math.max(0.1, Math.min(1, autoZoomSensitivity))
+              // Lower sensitivity = fewer keyframes by requiring larger spacing between events.
+              const minGapSeconds = 0.5 + (1 - normalizedSensitivity) * 2.5
+              // Lower sensitivity = subtler zoom scale.
+              const scaleFactor = 0.45 + normalizedSensitivity * 0.9
+
+              let lastAcceptedTime = -Infinity
+              zoomKeyframes = rawKfs
+                .filter((kf: ZoomKeyframe) => {
+                  if (kf.time - lastAcceptedTime < minGapSeconds) {
+                    return false
+                  }
+                  lastAcceptedTime = kf.time
+                  return true
+                })
+                .map((kf: ZoomKeyframe) => ({
+                  ...kf,
+                  scale: Math.max(1.0, Math.min(3.5, 1 + (kf.scale - 1) * scaleFactor))
+                }))
+            } catch {
+              zoomKeyframes = []
+            }
+          }
+
           const captureBounds = captureBoundsRef.current
-          if (!captureBounds) throw new Error('Missing capture bounds for auto-zoom generation')
-          const rawKfs = await window.electronAPI.generateZoomKeyframes(
-            mouseEventsRef.current,
-            duration,
-            captureBounds
-          )
-          const normalizedSensitivity = Math.max(0.1, Math.min(1, autoZoomSensitivity))
-          // Lower sensitivity = fewer keyframes by requiring larger spacing between events.
-          const minGapSeconds = 0.5 + (1 - normalizedSensitivity) * 2.5
-          // Lower sensitivity = subtler zoom scale.
-          const scaleFactor = 0.45 + normalizedSensitivity * 0.9
+          const recordingDimensions = recordingDimensionsRef.current
+          const captureWidth = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.width ?? captureBounds?.width ?? 0)
+          const captureHeight = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.height ?? captureBounds?.height ?? 0)
 
-          let lastAcceptedTime = -Infinity
-          zoomKeyframes = rawKfs
-            .filter((kf: ZoomKeyframe) => {
-              if (kf.time - lastAcceptedTime < minGapSeconds) {
-                return false
-              }
-              lastAcceptedTime = kf.time
-              return true
-            })
-            .map((kf: ZoomKeyframe) => ({
-              ...kf,
-              scale: Math.max(1.0, Math.min(3.5, 1 + (kf.scale - 1) * scaleFactor))
-            }))
-        } catch {
-          zoomKeyframes = []
+          onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth, captureHeight })
+
+          cancelRecordingResources()
+        } finally {
+          finalizePromiseRef.current = null
         }
-      }
-
-      onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth: clampedWidth, captureHeight: clampedHeight })
-
-      cancelRecordingResources()
+      })()
+      return finalizePromiseRef.current
     }
 
-    mediaRecorderRef.current.stop()
+    recorder.onstop = () => {
+      void finalizeRecording()
+    }
+
     if (timerRef.current) clearInterval(timerRef.current)
+
+    if (recorder.state === 'inactive') {
+      void finalizeRecording()
+      return
+    }
+
+    try {
+      recorder.stop()
+    } catch (err) {
+      console.warn('Failed to stop recorder, finalizing with captured data.', err)
+      void finalizeRecording()
+    }
   }
 
   const togglePause = () => {

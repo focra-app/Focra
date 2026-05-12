@@ -754,18 +754,23 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
       )
 
       const mimeType = filteredOption.mimeTypes[0] || 'video/webm'
-      let finalBlob = new Blob([exportedBuffer], { type: mimeType })
       let finalExtension = filteredOption.extension
+      let finalBuffer = exportedBuffer
 
       if (filteredOption.value === 'mp4' && mimeType.includes('webm')) {
         setExportDetail('Remuxing WebM to MP4... This may take a moment.')
         try {
           const ffmpeg = new FFmpeg()
           await ffmpeg.load()
-          await ffmpeg.writeFile('input.webm', await fetchFile(finalBlob))
+          await ffmpeg.writeFile('input.webm', await fetchFile(new Blob([exportedBuffer], { type: mimeType })))
           await ffmpeg.exec(['-i', 'input.webm', '-c', 'copy', 'output.mp4'])
           const data = await ffmpeg.readFile('output.mp4')
-          finalBlob = new Blob([data], { type: 'video/mp4' })
+          // Avoid unnecessary copy if the Uint8Array spans the full ArrayBuffer.
+          // Otherwise, slice to ensure IPC writes only the relevant byte range.
+          finalBuffer =
+            data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
+              ? data.buffer
+              : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
           finalExtension = 'mp4'
         } catch (e) {
           console.error('MP4 Remux failed, saving as WebM fallback.', e)
@@ -774,18 +779,29 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         }
       }
 
-      const url = URL.createObjectURL(finalBlob)
-      const a = document.createElement('a')
-      a.style.display = 'none'
-      a.href = url
-      a.download = `focra-export.${finalExtension}`
-      document.body.appendChild(a)
-      a.click()
-      
-      setTimeout(() => {
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-      }, 100)
+      const defaultName = `focra-export.${finalExtension}`
+      setExportDetail('Choose a save location...')
+      const dialogResult = await window.electronAPI.showSaveDialog({
+        defaultName,
+        filters: [
+          { name: `${finalExtension.toUpperCase()} Video`, extensions: [finalExtension] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      })
+
+      if (dialogResult.error) {
+        throw new Error(dialogResult.error)
+      }
+      if (dialogResult.canceled || !dialogResult.saveToken) {
+        setExportDetail('Export canceled.')
+        return
+      }
+
+      setExportDetail('Saving export...')
+      const saveResult = await window.electronAPI.saveFile(dialogResult.saveToken, finalBuffer)
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || 'Failed to save exported file')
+      }
 
       setDone(true)
     } catch (err) {
