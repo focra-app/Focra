@@ -22,6 +22,7 @@ const MIN_VIDEO_BITRATE = 8_000_000
 const MAX_VIDEO_BITRATE = 45_000_000
 const VIDEO_BITS_PER_PIXEL_PER_FRAME = 0.1
 const AUDIO_BITRATE = 128_000
+const MIN_CAPTURE_DIMENSION = 1
 const TOGGLE_WIDTH = 44
 const TOGGLE_HEIGHT = 24
 const TOGGLE_EDGE_OFFSET = 4
@@ -202,7 +203,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             video: videoConstraints
           })
           setSystemAudioEnabled(false)
-          setError('System audio capture failed. Recording without system audio.')
+          setError('System audio capture is unavailable. Recording will continue with video only. Check system audio permissions or device settings.')
         } else {
           throw audioError
         }
@@ -402,7 +403,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       if (finalizePromise) return finalizePromise
       finalizePromise = (async () => {
       if (chunksRef.current.length === 0) {
-        setError('Recording stopped before any data was captured.')
+        setError('No recording data was captured. This can happen if recording stops too quickly. Try recording again for a longer duration.')
         cancelRecordingResources()
         return
       }
@@ -454,8 +455,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       const captureBounds = captureBoundsRef.current
       const recordingDimensions = recordingDimensionsRef.current
-      const captureWidth = Math.max(1, recordingDimensions?.width ?? captureBounds?.width ?? 1)
-      const captureHeight = Math.max(1, recordingDimensions?.height ?? captureBounds?.height ?? 1)
+      const captureWidth = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.width ?? captureBounds?.width ?? MIN_CAPTURE_DIMENSION)
+      const captureHeight = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.height ?? captureBounds?.height ?? MIN_CAPTURE_DIMENSION)
 
       onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth, captureHeight })
 
