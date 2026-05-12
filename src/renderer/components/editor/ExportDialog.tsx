@@ -774,18 +774,26 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         }
       }
 
-      const url = URL.createObjectURL(finalBlob)
-      const a = document.createElement('a')
-      a.style.display = 'none'
-      a.href = url
-      a.download = `focra-export.${finalExtension}`
-      document.body.appendChild(a)
-      a.click()
-      
-      setTimeout(() => {
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-      }, 100)
+      const defaultName = `focra-export.${finalExtension}`
+      setExportDetail('Choose a save location...')
+      const dialogResult = await window.electronAPI.showSaveDialog({
+        defaultName,
+        filters: [
+          { name: `${finalExtension.toUpperCase()} Video`, extensions: [finalExtension] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      })
+
+      if (dialogResult.canceled || !dialogResult.saveToken) {
+        setExportDetail('Export canceled.')
+        return
+      }
+
+      setExportDetail('Saving export...')
+      const saveResult = await window.electronAPI.saveFile(dialogResult.saveToken, await finalBlob.arrayBuffer())
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || 'Failed to save exported file')
+      }
 
       setDone(true)
     } catch (err) {
