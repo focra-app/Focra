@@ -405,65 +405,65 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     const finalizeRecording = async () => {
       if (finalizePromiseRef.current) return finalizePromiseRef.current
       finalizePromiseRef.current = (async () => {
-      if (chunksRef.current.length === 0) {
-        setError('No recording data captured. Please try recording again.')
-        cancelRecordingResources()
-        return
-      }
-
-      // Compute active recording time, excluding any time spent paused
-      const totalElapsed = Date.now() - startTimeRef.current
-      // If the recording was paused when stop() was called, count that segment too
-      const finalPausedMs =
-        pauseStartRef.current > 0
-          ? pausedDurationRef.current + (Date.now() - pauseStartRef.current)
-          : pausedDurationRef.current
-      const duration = (totalElapsed - finalPausedMs) / 1000
-      const blob = new Blob(chunksRef.current, { type: 'video/webm' })
-      const videoUrl = URL.createObjectURL(blob)
-
-      let zoomKeyframes: ZoomKeyframe[] = []
-      if (autoZoomEnabled && mouseEventsRef.current.length > 0) {
-        try {
-          const captureBounds = captureBoundsRef.current
-          if (!captureBounds) throw new Error('Missing capture bounds for auto-zoom generation')
-          const rawKfs = await window.electronAPI.generateZoomKeyframes(
-            mouseEventsRef.current,
-            duration,
-            captureBounds
-          )
-          const normalizedSensitivity = Math.max(0.1, Math.min(1, autoZoomSensitivity))
-          // Lower sensitivity = fewer keyframes by requiring larger spacing between events.
-          const minGapSeconds = 0.5 + (1 - normalizedSensitivity) * 2.5
-          // Lower sensitivity = subtler zoom scale.
-          const scaleFactor = 0.45 + normalizedSensitivity * 0.9
-
-          let lastAcceptedTime = -Infinity
-          zoomKeyframes = rawKfs
-            .filter((kf: ZoomKeyframe) => {
-              if (kf.time - lastAcceptedTime < minGapSeconds) {
-                return false
-              }
-              lastAcceptedTime = kf.time
-              return true
-            })
-            .map((kf: ZoomKeyframe) => ({
-              ...kf,
-              scale: Math.max(1.0, Math.min(3.5, 1 + (kf.scale - 1) * scaleFactor))
-            }))
-        } catch {
-          zoomKeyframes = []
+        if (chunksRef.current.length === 0) {
+          setError('No recording data captured. Please try recording again.')
+          cancelRecordingResources()
+          return
         }
-      }
 
-      const captureBounds = captureBoundsRef.current
-      const recordingDimensions = recordingDimensionsRef.current
-      const captureWidth = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.width ?? captureBounds?.width ?? 0)
-      const captureHeight = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.height ?? captureBounds?.height ?? 0)
+        // Compute active recording time, excluding any time spent paused
+        const totalElapsed = Date.now() - startTimeRef.current
+        // If the recording was paused when stop() was called, count that segment too
+        const finalPausedMs =
+          pauseStartRef.current > 0
+            ? pausedDurationRef.current + (Date.now() - pauseStartRef.current)
+            : pausedDurationRef.current
+        const duration = (totalElapsed - finalPausedMs) / 1000
+        const blob = new Blob(chunksRef.current, { type: 'video/webm' })
+        const videoUrl = URL.createObjectURL(blob)
 
-      onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth, captureHeight })
+        let zoomKeyframes: ZoomKeyframe[] = []
+        if (autoZoomEnabled && mouseEventsRef.current.length > 0) {
+          try {
+            const captureBounds = captureBoundsRef.current
+            if (!captureBounds) throw new Error('Missing capture bounds for auto-zoom generation')
+            const rawKfs = await window.electronAPI.generateZoomKeyframes(
+              mouseEventsRef.current,
+              duration,
+              captureBounds
+            )
+            const normalizedSensitivity = Math.max(0.1, Math.min(1, autoZoomSensitivity))
+            // Lower sensitivity = fewer keyframes by requiring larger spacing between events.
+            const minGapSeconds = 0.5 + (1 - normalizedSensitivity) * 2.5
+            // Lower sensitivity = subtler zoom scale.
+            const scaleFactor = 0.45 + normalizedSensitivity * 0.9
 
-      cancelRecordingResources()
+            let lastAcceptedTime = -Infinity
+            zoomKeyframes = rawKfs
+              .filter((kf: ZoomKeyframe) => {
+                if (kf.time - lastAcceptedTime < minGapSeconds) {
+                  return false
+                }
+                lastAcceptedTime = kf.time
+                return true
+              })
+              .map((kf: ZoomKeyframe) => ({
+                ...kf,
+                scale: Math.max(1.0, Math.min(3.5, 1 + (kf.scale - 1) * scaleFactor))
+              }))
+          } catch {
+            zoomKeyframes = []
+          }
+        }
+
+        const captureBounds = captureBoundsRef.current
+        const recordingDimensions = recordingDimensionsRef.current
+        const captureWidth = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.width ?? captureBounds?.width ?? 0)
+        const captureHeight = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.height ?? captureBounds?.height ?? 0)
+
+        onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth, captureHeight })
+
+        cancelRecordingResources()
       })()
       return finalizePromiseRef.current
     }
