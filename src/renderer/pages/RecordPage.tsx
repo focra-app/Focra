@@ -206,7 +206,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             video: videoConstraints
           })
           setSystemAudioEnabled(false)
-          setError('System audio capture is unavailable. Recording will continue with video only. Check system audio permissions or device settings.')
+          setError('System audio unavailable. Recording video only. Check audio permissions.')
         } else {
           throw audioError
         }
@@ -406,7 +406,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       if (finalizePromiseRef.current) return finalizePromiseRef.current
       finalizePromiseRef.current = (async () => {
       if (chunksRef.current.length === 0) {
-        setError('No recording data was captured. This may occur if recording stops too quickly or if there was an issue capturing the stream. Please try recording again.')
+        setError('No recording data captured. Please try recording again.')
         cancelRecordingResources()
         return
       }
@@ -458,8 +458,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       const captureBounds = captureBoundsRef.current
       const recordingDimensions = recordingDimensionsRef.current
-      const captureWidth = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.width ?? captureBounds?.width ?? MIN_CAPTURE_DIMENSION)
-      const captureHeight = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.height ?? captureBounds?.height ?? MIN_CAPTURE_DIMENSION)
+      const captureWidth = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.width ?? captureBounds?.width ?? 0)
+      const captureHeight = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.height ?? captureBounds?.height ?? 0)
 
       onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth, captureHeight })
 
