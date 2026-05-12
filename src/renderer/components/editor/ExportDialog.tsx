@@ -766,7 +766,7 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
           await ffmpeg.exec(['-i', 'input.webm', '-c', 'copy', 'output.mp4'])
           const data = await ffmpeg.readFile('output.mp4')
           // Reuse the underlying ArrayBuffer when the Uint8Array spans it entirely.
-          // Otherwise, slice to avoid writing unrelated bytes from a shared buffer.
+          // Otherwise, slice to ensure IPC writes only the relevant byte range.
           finalBuffer =
             data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
               ? data.buffer
