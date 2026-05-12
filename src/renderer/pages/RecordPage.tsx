@@ -175,22 +175,41 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       const clampedWidth = captureBounds.width; const clampedHeight = captureBounds.height;
 
-      const displayStream = await navigator.mediaDevices.getUserMedia({
-        audio: systemAudioEnabled
-          ? { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id } }
-          : false,
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: selectedSource.id,
-            maxWidth: clampedWidth,
-            maxHeight: clampedHeight,
-            maxFrameRate: 60
-          }
-        } as any
-      })
+      const videoConstraints = {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: selectedSource.id
+        },
+        width: { ideal: clampedWidth },
+        height: { ideal: clampedHeight },
+        frameRate: { ideal: 30, max: 60 }
+      } as any
+
+      let displayStream: MediaStream
+      try {
+        displayStream = await navigator.mediaDevices.getUserMedia({
+          audio: systemAudioEnabled
+            ? { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id } }
+            : false,
+          video: videoConstraints
+        })
+      } catch (audioError) {
+        if (!systemAudioEnabled) throw audioError
+        console.warn('System audio capture failed, retrying without system audio.', audioError)
+        displayStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: videoConstraints
+        })
+        setSystemAudioEnabled(false)
+        setError('System audio capture failed. Recording without system audio.')
+      }
+
+      displayStreamRef.current = displayStream
+
       const videoTrack = displayStream.getVideoTracks()[0]
       if (!videoTrack) {
+        displayStream.getTracks().forEach((track) => track.stop())
+        displayStreamRef.current = null
         throw new Error('Unable to start recording: no video track was returned for the selected source.')
       }
       const trackSettings = videoTrack.getSettings()
@@ -206,9 +225,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       let combinedStream = displayStream
       micStreamRef.current = null
       audioContextRef.current = null
-            micAudioTrackRef.current = null
+      micAudioTrackRef.current = null
       systemAudioTrackRef.current = null
-      displayStreamRef.current = displayStream
 
       if (!systemAudioEnabled) {
         // Some desktop-capture setups may still return an audio track despite audio:false.
@@ -321,6 +339,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         setElapsedTime((t) => t + 1)
       }, 1000)
     } catch (err) {
+      cancelRecordingResources()
       setError(`Failed to start recording: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
@@ -364,14 +383,24 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   }, [cleanupAudio])
 
   const stopRecording = () => {
-    if (!mediaRecorderRef.current) return
+    const recorder = mediaRecorderRef.current
+    if (!recorder) return
 
     // Stop global mouse tracking immediately
     window.electronAPI.stopMouseTracking()
     unsubscribeMouseClickRef.current?.()
     unsubscribeMouseClickRef.current = null
 
-    mediaRecorderRef.current.onstop = async () => {
+    let finalized = false
+    const finalizeRecording = async () => {
+      if (finalized) return
+      finalized = true
+      if (chunksRef.current.length === 0) {
+        setError('Recording stopped before any data was captured.')
+        cancelRecordingResources()
+        return
+      }
+
       // Compute active recording time, excluding any time spent paused
       const totalElapsed = Date.now() - startTimeRef.current
       // If the recording was paused when stop() was called, count that segment too
@@ -417,13 +446,32 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         }
       }
 
-      onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth: clampedWidth, captureHeight: clampedHeight })
+      const captureBounds = captureBoundsRef.current
+      const captureWidth = captureBounds?.width ?? 0
+      const captureHeight = captureBounds?.height ?? 0
+
+      onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth, captureHeight })
 
       cancelRecordingResources()
     }
 
-    mediaRecorderRef.current.stop()
+    recorder.onstop = () => {
+      void finalizeRecording()
+    }
+
     if (timerRef.current) clearInterval(timerRef.current)
+
+    if (recorder.state === 'inactive') {
+      void finalizeRecording()
+      return
+    }
+
+    try {
+      recorder.stop()
+    } catch (err) {
+      console.warn('Failed to stop recorder, finalizing with captured data.', err)
+      void finalizeRecording()
+    }
   }
 
   const togglePause = () => {
