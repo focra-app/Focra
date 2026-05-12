@@ -100,6 +100,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const pauseStartRef = useRef<number>(0)       // timestamp of current pause start
   const captureBoundsRef = useRef<CaptureBounds | null>(null)
   const recordingDimensionsRef = useRef<{ width: number; height: number } | null>(null)
+  const finalizePromiseRef = useRef<Promise<void> | null>(null)
 
   // High-quality preview stream when a source is selected
   useEffect(() => {
@@ -172,6 +173,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
     try {
       const autoZoomTrackingEnabled = autoZoomEnabled && selectedSource.id.startsWith('screen')
+      finalizePromiseRef.current = null
       const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
       captureBoundsRef.current = captureBounds
 
@@ -218,8 +220,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
         throw new Error('Unable to start recording: no video track was returned for the selected source.')
       }
       const trackSettings = videoTrack.getSettings()
-      const resolvedWidth = Math.max(1, Math.round(trackSettings?.width ?? clampedWidth))
-      const resolvedHeight = Math.max(1, Math.round(trackSettings?.height ?? clampedHeight))
+      const resolvedWidth = Math.max(MIN_CAPTURE_DIMENSION, Math.round(trackSettings?.width ?? clampedWidth))
+      const resolvedHeight = Math.max(MIN_CAPTURE_DIMENSION, Math.round(trackSettings?.height ?? clampedHeight))
       const resolvedFrameRate = Math.max(1, Math.round(trackSettings?.frameRate ?? TARGET_FRAME_RATE))
       recordingDimensionsRef.current = { width: resolvedWidth, height: resolvedHeight }
       const pixelRate = resolvedWidth * resolvedHeight * resolvedFrameRate
@@ -383,6 +385,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     pauseStartRef.current = 0
     captureBoundsRef.current = null
     recordingDimensionsRef.current = null
+    finalizePromiseRef.current = null
     cleanupAudio()
     setStream(null)
     setIsRecording(false)
@@ -398,10 +401,9 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     unsubscribeMouseClickRef.current?.()
     unsubscribeMouseClickRef.current = null
 
-    let finalizePromise: Promise<void> | null = null
     const finalizeRecording = async () => {
-      if (finalizePromise) return finalizePromise
-      finalizePromise = (async () => {
+      if (finalizePromiseRef.current) return finalizePromiseRef.current
+      finalizePromiseRef.current = (async () => {
       if (chunksRef.current.length === 0) {
         setError('No recording data was captured. This can happen if recording stops too quickly. Try recording again for a longer duration.')
         cancelRecordingResources()
@@ -462,7 +464,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       cancelRecordingResources()
       })()
-      return finalizePromise
+      return finalizePromiseRef.current
     }
 
     recorder.onstop = () => {
