@@ -98,6 +98,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const pausedDurationRef = useRef<number>(0)  // accumulated paused ms
   const pauseStartRef = useRef<number>(0)       // timestamp of current pause start
   const captureBoundsRef = useRef<CaptureBounds | null>(null)
+  const recordingDimensionsRef = useRef<{ width: number; height: number } | null>(null)
 
   // High-quality preview stream when a source is selected
   useEffect(() => {
@@ -194,14 +195,17 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           video: videoConstraints
         })
       } catch (audioError) {
-        if (!systemAudioEnabled) throw audioError
-        console.warn('System audio capture failed, retrying without system audio.', audioError)
-        displayStream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: videoConstraints
-        })
-        setSystemAudioEnabled(false)
-        setError('System audio capture failed. Recording without system audio.')
+        if (systemAudioEnabled) {
+          console.warn('System audio capture failed, retrying without system audio.', audioError)
+          displayStream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: videoConstraints
+          })
+          setSystemAudioEnabled(false)
+          setError('System audio capture failed. Recording without system audio.')
+        } else {
+          throw audioError
+        }
       }
 
       displayStreamRef.current = displayStream
@@ -216,6 +220,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       const resolvedWidth = Math.max(1, Math.round(trackSettings?.width ?? clampedWidth))
       const resolvedHeight = Math.max(1, Math.round(trackSettings?.height ?? clampedHeight))
       const resolvedFrameRate = Math.max(1, Math.round(trackSettings?.frameRate ?? TARGET_FRAME_RATE))
+      recordingDimensionsRef.current = { width: resolvedWidth, height: resolvedHeight }
       const pixelRate = resolvedWidth * resolvedHeight * resolvedFrameRate
       const videoBitsPerSecond = Math.min(
         MAX_VIDEO_BITRATE,
@@ -376,6 +381,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     pausedDurationRef.current = 0
     pauseStartRef.current = 0
     captureBoundsRef.current = null
+    recordingDimensionsRef.current = null
     cleanupAudio()
     setStream(null)
     setIsRecording(false)
@@ -391,10 +397,10 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     unsubscribeMouseClickRef.current?.()
     unsubscribeMouseClickRef.current = null
 
-    let finalized = false
+    let finalizePromise: Promise<void> | null = null
     const finalizeRecording = async () => {
-      if (finalized) return
-      finalized = true
+      if (finalizePromise) return finalizePromise
+      finalizePromise = (async () => {
       if (chunksRef.current.length === 0) {
         setError('Recording stopped before any data was captured.')
         cancelRecordingResources()
@@ -447,12 +453,15 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       }
 
       const captureBounds = captureBoundsRef.current
-      const captureWidth = captureBounds?.width ?? 0
-      const captureHeight = captureBounds?.height ?? 0
+      const recordingDimensions = recordingDimensionsRef.current
+      const captureWidth = Math.max(1, recordingDimensions?.width ?? captureBounds?.width ?? 1)
+      const captureHeight = Math.max(1, recordingDimensions?.height ?? captureBounds?.height ?? 1)
 
       onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth, captureHeight })
 
       cancelRecordingResources()
+      })()
+      return finalizePromise
     }
 
     recorder.onstop = () => {
