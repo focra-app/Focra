@@ -22,7 +22,7 @@ const MIN_VIDEO_BITRATE = 8_000_000
 const MAX_VIDEO_BITRATE = 45_000_000
 const VIDEO_BITS_PER_PIXEL_PER_FRAME = 0.1
 const AUDIO_BITRATE = 128_000
-const MIN_CAPTURE_DIMENSION = 1
+const MIN_CAPTURE_DIMENSION = 64
 const TOGGLE_WIDTH = 44
 const TOGGLE_HEIGHT = 24
 const TOGGLE_EDGE_OFFSET = 4
@@ -177,7 +177,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       const captureBounds = await window.electronAPI.getSourceBounds(selectedSource.id, selectedSource.displayId)
       captureBoundsRef.current = captureBounds
 
-      const clampedWidth = captureBounds.width; const clampedHeight = captureBounds.height;
+      const clampedWidth = captureBounds.width
+      const clampedHeight = captureBounds.height
 
       const videoConstraints = {
         mandatory: {
@@ -405,7 +406,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       if (finalizePromiseRef.current) return finalizePromiseRef.current
       finalizePromiseRef.current = (async () => {
       if (chunksRef.current.length === 0) {
-        setError('No recording data was captured. This can happen if recording stops too quickly. Try recording again for a longer duration.')
+        setError('No recording data was captured. This may occur if recording stops too quickly or if there was an issue capturing the stream. Please try recording again.')
         cancelRecordingResources()
         return
       }
