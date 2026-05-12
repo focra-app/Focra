@@ -765,7 +765,10 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
           await ffmpeg.writeFile('input.webm', await fetchFile(new Blob([exportedBuffer], { type: mimeType })))
           await ffmpeg.exec(['-i', 'input.webm', '-c', 'copy', 'output.mp4'])
           const data = await ffmpeg.readFile('output.mp4')
-          finalBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+          finalBuffer =
+            data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
+              ? data.buffer
+              : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
           finalExtension = 'mp4'
         } catch (e) {
           console.error('MP4 Remux failed, saving as WebM fallback.', e)
