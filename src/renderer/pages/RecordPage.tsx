@@ -134,7 +134,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
               chromeMediaSourceId: selectedSource.id,
               maxWidth: clampedWidth,
               maxHeight: clampedHeight,
-              maxFrameRate: 60
+              maxFrameRate: TARGET_FRAME_RATE
             }
           } as any
         })
