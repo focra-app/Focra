@@ -132,10 +132,10 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             mandatory: {
               chromeMediaSource: 'desktop',
               chromeMediaSourceId: selectedSource.id,
-            },
-            width: { ideal: clampedWidth },
-            height: { ideal: clampedHeight },
-            frameRate: { ideal: 30, max: 60 }
+              maxWidth: clampedWidth,
+              maxHeight: clampedHeight,
+              maxFrameRate: 60
+            }
           } as any
         })
 
@@ -183,11 +183,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       const videoConstraints = {
         mandatory: {
           chromeMediaSource: 'desktop',
-          chromeMediaSourceId: selectedSource.id
-        },
-        width: { ideal: clampedWidth },
-        height: { ideal: clampedHeight },
-        frameRate: { ideal: 30, max: 60 }
+          chromeMediaSourceId: selectedSource.id,
+          maxWidth: clampedWidth,
+          maxHeight: clampedHeight,
+          maxFrameRate: TARGET_FRAME_RATE
+        }
       } as any
 
       let displayStream: MediaStream
