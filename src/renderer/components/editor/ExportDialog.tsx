@@ -301,6 +301,60 @@ async function seekTo(video: HTMLVideoElement, time: number) {
   await ensureVideoReadyForFrame(video)
 }
 
+// ---------------------------------------------------------------------------
+// Seek-based offline renderer helpers
+//
+// The old approach played the video in real-time and raced a rAF loop against
+// it. Any system load caused frames to be drawn at the wrong currentTime,
+// producing repeated/frozen/skipped frames in the output.
+//
+// These helpers implement seek-based offline rendering: the video is NEVER
+// played. For each frame we seek to its exact timestamp, wait for the decoder
+// to confirm the frame is ready, draw the canvas, and push it to MediaRecorder.
+// ---------------------------------------------------------------------------
+
+/** Wait for the video decoder to settle on the frame we just seeked to.
+ *  Uses requestVideoFrameCallback when available (Chromium 86+, Electron 14+)
+ *  for frame-accurate confirmation, falls back to seeked + one rAF tick. */
+function waitForDecodedFrame(video: HTMLVideoElement): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error('Timed out waiting for decoded video frame'))
+    }, MEDIA_EVENT_TIMEOUT_MS)
+
+    const done = () => {
+      window.clearTimeout(timeoutId)
+      resolve()
+    }
+
+    // requestVideoFrameCallback fires only after the compositor has a new
+    // decoded frame ready at currentTime — far more reliable than 'seeked',
+    // which fires before decoding completes on many codecs.
+    if (typeof (video as any).requestVideoFrameCallback === 'function') {
+      ;(video as any).requestVideoFrameCallback(done)
+    } else {
+      // Fallback: 'seeked' + one rAF tick to let the frame paint to the element.
+      const onSeeked = () => {
+        video.removeEventListener('seeked', onSeeked)
+        requestAnimationFrame(done)
+      }
+      video.addEventListener('seeked', onSeeked, { once: true })
+    }
+  })
+}
+
+/** Seek to `time` and wait for the decoded frame to be available. */
+async function seekToFrame(video: HTMLVideoElement, time: number): Promise<void> {
+  if (Math.abs(video.currentTime - time) < 0.0001) {
+    // Already on this frame — still wait for rVFC so we know it’s decoded.
+    await waitForDecodedFrame(video)
+    return
+  }
+  const frameReady = waitForDecodedFrame(video)
+  video.currentTime = time
+  await frameReady
+}
+
 async function loadBackgroundImage(project: EditorProject): Promise<HTMLImageElement | null> {
   const { background } = project
   if (background.type !== 'image' || !background.imageUrl) return null
@@ -468,103 +522,117 @@ async function renderVideoWithEffects(
 ): Promise<ArrayBuffer> {
   const formatOption = getFormatOption(settings.format)
 
-  const audioVideo = document.createElement('video')
-  const cleanupAudioVideo = () => {
-    audioVideo.pause()
-    audioVideo.removeAttribute('src')
-    audioVideo.load()
+  // Two video elements:
+  //   videoEl  — provides decoded frames for canvas drawing (muted, always paused)
+  //   audioEl  — plays in real-time to supply a live audio track to the stream
+  const videoEl = document.createElement('video')
+  const audioEl = document.createElement('video')
+
+  const cleanupEls = () => {
+    for (const el of [videoEl, audioEl]) {
+      el.pause()
+      el.removeAttribute('src')
+      el.load()
+    }
   }
 
   try {
-    audioVideo.src = project.videoUrl
-    audioVideo.preload = 'auto'
-    audioVideo.muted = false
-    audioVideo.volume = 0
-    audioVideo.playsInline = true
-    await waitForVideoEvent(audioVideo, 'loadedmetadata')
-    
-    const loadedVideoDuration = Number.isFinite(audioVideo.duration) && audioVideo.duration > 0 ? audioVideo.duration : 0
+    // ------------------------------------------------------------------
+    // 1. Load metadata
+    // ------------------------------------------------------------------
+    videoEl.src = project.videoUrl
+    videoEl.preload = 'auto'
+    videoEl.muted = true          // never plays audio — pure decode source
+    videoEl.playsInline = true
+    await waitForVideoEvent(videoEl, 'loadedmetadata')
+
+    const loadedVideoDuration = Number.isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration : 0
     const fallbackProjectDuration = Number.isFinite(project.duration) && project.duration > 0 ? project.duration : 0
     const mediaDuration = loadedVideoDuration || fallbackProjectDuration
-    if (mediaDuration <= 0) {
-      throw new Error('Unable to determine media duration for export')
-    }
+    if (mediaDuration <= 0) throw new Error('Unable to determine media duration for export')
+
     const startTime = Math.max(0, Math.min(mediaDuration, project.trimPoints.inPoint))
     const requestedEndTime = Math.min(mediaDuration, project.trimPoints.outPoint)
     const remainingDuration = Math.max(0, mediaDuration - startTime)
     const clampedMinDuration = Math.min(MIN_EXPORT_DURATION_SECONDS, remainingDuration)
     const endTime = Math.min(mediaDuration, Math.max(startTime + clampedMinDuration, requestedEndTime))
+    const totalDuration = Math.max(END_FRAME_EPSILON_SECONDS, endTime - startTime)
 
     const requestedDimensions = getDimensions(settings)
     const { width, height, wasClamped } = clampOutputToSourceDimensions(
       requestedDimensions,
-      audioVideo.videoWidth,
-      audioVideo.videoHeight
+      videoEl.videoWidth,
+      videoEl.videoHeight
     )
     if (wasClamped) {
       onProgress?.({
         progress: 0,
-        detail: `Requested resolution exceeds source quality. Export capped to ${width}x${height} for reliability.`
+        detail: `Requested resolution exceeds source quality. Export capped to ${width}×${height}.`
       })
     }
 
+    // ------------------------------------------------------------------
+    // 2. Canvas + captureStream
+    // ------------------------------------------------------------------
     const canvas = document.createElement('canvas')
     canvas.width = width
     canvas.height = height
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('Unable to initialize export renderer')
 
-    await seekTo(audioVideo, startTime)
-
     const bgImage = await loadBackgroundImage(project)
-    drawFrame(ctx, project, audioVideo, startTime, width, height, bgImage)
 
-    const getCanvasVideoTrackOrThrow = (stream: MediaStream): CanvasCaptureMediaStreamTrack => {
-      const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
-      if (!track) throw new Error('Unable to initialize export video track')
-      return track
-    }
-
+    // Prefer captureStream(0) + requestFrame() so we control when frames are
+    // pushed. Fall back to captureStream(fps) if requestFrame is unavailable.
     let canvasStream = canvas.captureStream(0)
-    const stopCanvasStreamTracks = () => {
-      canvasStream.getTracks().forEach((track) => track.stop())
-    }
-    
-    let videoTrack: CanvasCaptureMediaStreamTrack
-    try {
-      videoTrack = getCanvasVideoTrackOrThrow(canvasStream)
-    } catch (err) {
-      stopCanvasStreamTracks()
-      throw err
-    }
+    const stopCanvasStreamTracks = () => canvasStream.getTracks().forEach((t) => t.stop())
 
-    const createRequestFrameWrapper = (track: CanvasCaptureMediaStreamTrack): (() => void) | null =>
-      typeof track.requestFrame === 'function' ? () => track.requestFrame() : null
+    let videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
+    if (!videoTrack) { stopCanvasStreamTracks(); throw new Error('Unable to initialize export video track') }
 
-    let requestFrame = createRequestFrameWrapper(videoTrack)
+    let requestFrame: (() => void) | null =
+      typeof videoTrack.requestFrame === 'function' ? () => videoTrack!.requestFrame() : null
+
     if (!requestFrame) {
       stopCanvasStreamTracks()
       canvasStream = canvas.captureStream(settings.fps)
-      try {
-        videoTrack = getCanvasVideoTrackOrThrow(canvasStream)
-      } catch (err) {
-        stopCanvasStreamTracks()
-        throw err
-      }
-      requestFrame = createRequestFrameWrapper(videoTrack)
+      videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
+      if (!videoTrack) throw new Error('Unable to initialize export video track (fallback)')
+      requestFrame = typeof videoTrack.requestFrame === 'function' ? () => videoTrack!.requestFrame() : null
     }
 
-    if (typeof audioVideo.captureStream === 'function') {
+    // ------------------------------------------------------------------
+    // 3. Audio track — a separate real-time playback element
+    //    Plays silently alongside the seek loop so MediaRecorder captures
+    //    a live audio track. The user doesn’t hear it (volume = 0).
+    // ------------------------------------------------------------------
+    let hasAudio = false
+    if (typeof audioEl.captureStream === 'function') {
       try {
-        const audioStream = audioVideo.captureStream()
-        for (const track of audioStream.getAudioTracks()) {
-          canvasStream.addTrack(track)
+        audioEl.src = project.videoUrl
+        audioEl.preload = 'auto'
+        audioEl.muted = false
+        audioEl.volume = 0            // inaudible; stream still carries audio data
+        audioEl.playsInline = true
+        await waitForVideoEvent(audioEl, 'loadedmetadata')
+
+        const audioStream = audioEl.captureStream()
+        const audioTracks = audioStream.getAudioTracks()
+        if (audioTracks.length > 0) {
+          canvasStream = new MediaStream([
+            ...canvasStream.getVideoTracks(),
+            ...audioTracks
+          ])
+          hasAudio = true
         }
       } catch {
-        // Continue with video-only export if audio stream capture fails.
+        // No audio — continue with video-only export
       }
     }
 
+    // ------------------------------------------------------------------
+    // 4. MediaRecorder
+    // ------------------------------------------------------------------
     const selectedMimeType = chooseMimeTypeForCanvasStream(formatOption, canvasStream)
     if (!selectedMimeType) throw new Error(`${formatOption.label} export is not supported`)
     const mimeType = selectedMimeType
@@ -575,135 +643,100 @@ async function renderVideoWithEffects(
       Math.max(MIN_EXPORT_BITRATE, Math.round(pixelRate * EXPORT_BITS_PER_PIXEL_PER_FRAME))
     )
 
-    const recorder = new MediaRecorder(canvasStream, {
-      mimeType,
-      videoBitsPerSecond
-    })
-
+    const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond })
     const recordedChunks: Blob[] = []
+
     const exportBufferPromise = new Promise<ArrayBuffer>((resolve, reject) => {
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) recordedChunks.push(event.data)
-      }
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data) }
       recorder.onerror = () => reject(new Error('Export recording failed'))
       recorder.onstop = async () => {
         stopCanvasStreamTracks()
         try {
-          const blob = new Blob(recordedChunks, { type: mimeType })
-          resolve(await blob.arrayBuffer())
+          resolve(await new Blob(recordedChunks, { type: mimeType }).arrayBuffer())
         } catch (err) {
           reject(new Error(`Export recording failed: ${String(err)}`))
         }
       }
     })
 
-    let recorderStarted = false
+    // ------------------------------------------------------------------
+    // 5. Seek-based frame loop
+    //    The video is NEVER played. We seek to each frame’s exact timestamp,
+    //    wait for decoder confirmation, draw, push, advance. Frame-accurate.
+    // ------------------------------------------------------------------
     let capturedRenderError: unknown = null
+    let recorderStarted = false
 
     try {
-      recorder.start(RECORDER_TIMESLICE_MS)
-      recorderStarted = true
+      const frameDuration = 1 / settings.fps
+      const totalFrames = Math.ceil(totalDuration / frameDuration)
 
       const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
       const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
       let nextAnnotationIndex = 0
       let visibleAnnotations: EditorProject['annotations'] = []
-      let lastReportedProgress = -1
+
+      // Seek to startTime and draw frame 0 before starting the recorder,
+      // so the first push is ready immediately when recording begins.
+      await seekToFrame(videoEl, startTime)
+      drawFrame(ctx, project, videoEl, startTime, width, height, bgImage, {
+        zoomTransform: getSequentialZoomTransform(startTime),
+        visibleAnnotations: []
+      })
+
+      recorder.start(RECORDER_TIMESLICE_MS)
+      recorderStarted = true
       onProgress?.({ progress: 0 })
 
-      try {
-        await audioVideo.play()
-      } catch (err) {
-        console.warn('Export audio playback could not start', err)
+      // Start audio in sync with the recorder so the stream has audio from frame 1.
+      if (hasAudio) {
+        try {
+          audioEl.currentTime = startTime
+          await audioEl.play()
+        } catch {
+          // Audio play failed — continue video-only
+        }
       }
 
-      const totalExportDuration = Math.max(END_FRAME_EPSILON_SECONDS, endTime - startTime)
-      const exportDurationMs = totalExportDuration * 1000
+      // Push frame 0 (already drawn above).
+      requestFrame?.()
 
-      await new Promise<void>((resolve, reject) => {
-        let isFinishing = false
-        let rafId: number | null = null
+      // Iterate remaining frames: seek → decode confirm → draw → push.
+      for (let frameIndex = 1; frameIndex < totalFrames; frameIndex++) {
+        const frameTime = Math.min(
+          startTime + frameIndex * frameDuration,
+          endTime - END_FRAME_EPSILON_SECONDS
+        )
 
-        const finish = async () => {
-          if (isFinishing) return
-          isFinishing = true
-          if (rafId !== null) cancelAnimationFrame(rafId)
+        await seekToFrame(videoEl, frameTime)
 
-          // Small delay to let the recorder catch the last few frames/audio chunks
-          await new Promise(r => setTimeout(r, 200))
+        const annotationUpdate = computeVisibleAnnotationsForTime(
+          sortedAnnotations,
+          visibleAnnotations,
+          nextAnnotationIndex,
+          frameTime
+        )
+        nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
+        visibleAnnotations = annotationUpdate.visibleAnnotations
 
-          if (recorder.state !== 'inactive') {
-            recorder.stop()
-          }
-          onProgress?.({ progress: 1 })
-          resolve()
-        }
+        drawFrame(ctx, project, videoEl, frameTime, width, height, bgImage, {
+          zoomTransform: getSequentialZoomTransform(frameTime),
+          visibleAnnotations
+        })
+        requestFrame?.()
 
-        const frameDurationSeconds = 1 / settings.fps
-        // Track which video-time boundary we last rendered so we only draw once
-        // per frame even if rAF fires multiple times within the same frame window.
-        let lastRenderedFrameTime = startTime - frameDurationSeconds
+        onProgress?.({ progress: Math.min(0.99, frameIndex / totalFrames) })
+      }
 
-        const processFrame = () => {
-          if (isFinishing) return
-
-          const renderTime = audioVideo.currentTime
-
-          // End condition: video finished or we've reached the trim out-point.
-          if (audioVideo.ended || renderTime >= endTime - END_FRAME_EPSILON_SECONDS) {
-            finish()
-            return
-          }
-
-          // Only draw and push a frame when the video has advanced at least one
-          // frame boundary beyond what we last rendered. This keeps the canvas
-          // frame-rate locked to the video clock rather than wall-clock time,
-          // eliminating A/V drift caused by rAF wall-clock jitter.
-          if (renderTime >= lastRenderedFrameTime + frameDurationSeconds - 0.0001) {
-            lastRenderedFrameTime = renderTime
-
-            const progress = Math.max(0, Math.min(0.99, (renderTime - startTime) / totalExportDuration))
-            if (progress - lastReportedProgress >= 0.01) {
-              lastReportedProgress = progress
-              onProgress?.({ progress })
-            }
-
-            const annotationUpdate = computeVisibleAnnotationsForTime(
-              sortedAnnotations,
-              visibleAnnotations,
-              nextAnnotationIndex,
-              renderTime
-            )
-            nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
-            visibleAnnotations = annotationUpdate.visibleAnnotations
-
-            drawFrame(ctx, project, audioVideo, renderTime, width, height, bgImage, {
-              zoomTransform: getSequentialZoomTransform(renderTime),
-              visibleAnnotations
-            })
-            requestFrame?.()
-          }
-
-          rafId = requestAnimationFrame(processFrame)
-        }
-
-        audioVideo.onended = () => finish()
-        audioVideo.onerror = (_e) => reject(new Error('Playback error during export'))
-
-        // Safety timeout (duration + 60s) in case the video gets stuck
-        setTimeout(() => {
-          if (!isFinishing) {
-            console.warn('Export safety timeout reached')
-            finish()
-          }
-        }, exportDurationMs + 60000)
-
-        rafId = requestAnimationFrame(processFrame)
-      })
+      // Let the recorder flush its final internal buffer before stopping.
+      await new Promise<void>((r) => setTimeout(r, 200))
+      if (recorder.state !== 'inactive') recorder.stop()
+      onProgress?.({ progress: 1 })
     } catch (err) {
       capturedRenderError = err
     } finally {
-      cleanupAudioVideo()
+      audioEl.pause()
+      cleanupEls()
       if (recorderStarted && recorder.state !== 'inactive') recorder.stop()
       stopCanvasStreamTracks()
     }
@@ -715,7 +748,7 @@ async function renderVideoWithEffects(
 
     return exportBufferPromise
   } catch (err) {
-    cleanupAudioVideo()
+    cleanupEls()
     throw err
   }
 }
