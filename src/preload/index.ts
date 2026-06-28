@@ -60,6 +60,17 @@ const api = {
     ) => callback(data)
     ipcRenderer.on('mouse-click', handler)
     return () => ipcRenderer.removeListener('mouse-click', handler)
+  },
+
+  transcodeVideo: (buffer: ArrayBuffer, options: { fps: number }, onProgress?: (progress: number) => void): Promise<ArrayBuffer> => {
+    if (onProgress) {
+      const handler = (_event: any, progress: number) => onProgress(progress)
+      ipcRenderer.on('transcode-progress', handler)
+      return ipcRenderer.invoke('transcode-video', buffer, options).finally(() => {
+        ipcRenderer.removeListener('transcode-progress', handler)
+      })
+    }
+    return ipcRenderer.invoke('transcode-video', buffer, options)
   }
 }
 

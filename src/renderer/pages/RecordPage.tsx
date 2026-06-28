@@ -180,15 +180,29 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       const clampedWidth = captureBounds.width
       const clampedHeight = captureBounds.height
 
-      const videoConstraints = {
+      let idealWidth = clampedWidth
+      let idealHeight = clampedHeight
+
+      if (recordingResolution === '720p') { idealWidth = 1280; idealHeight = 720; }
+      else if (recordingResolution === '1080p') { idealWidth = 1920; idealHeight = 1080; }
+      else if (recordingResolution === '1440p') { idealWidth = 2560; idealHeight = 1440; }
+      else if (recordingResolution === '4k') { idealWidth = 3840; idealHeight = 2160; }
+
+      const videoConstraints: any = {
         mandatory: {
           chromeMediaSource: 'desktop',
-          chromeMediaSourceId: selectedSource.id
-        },
-        width: { ideal: clampedWidth },
-        height: { ideal: clampedHeight },
-        frameRate: { ideal: 30, max: 60 }
-      } as any
+          chromeMediaSourceId: selectedSource.id,
+          minFrameRate: 30,
+          maxFrameRate: 60
+        }
+      }
+
+      if (recordingResolution !== 'auto') {
+        videoConstraints.mandatory.minWidth = idealWidth
+        videoConstraints.mandatory.maxWidth = idealWidth
+        videoConstraints.mandatory.minHeight = idealHeight
+        videoConstraints.mandatory.maxHeight = idealHeight
+      }
 
       let displayStream: MediaStream
       try {
@@ -620,6 +634,24 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
                 />
               </div>
             )}
+          </div>
+
+          <div className="panel p-3.5 space-y-3">
+            <p className="label flex items-center gap-2"><Video size={14} /> Resolution</p>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-text-primary">Capture Quality</span>
+              <select
+                value={recordingResolution}
+                onChange={(e) => setRecordingResolution(e.target.value as any)}
+                className="bg-bg-tertiary border border-border rounded-lg px-2 py-1 text-sm text-text-primary focus:outline-none focus:border-accent"
+              >
+                <option value="auto">Auto (Source)</option>
+                <option value="720p">720p</option>
+                <option value="1080p">1080p</option>
+                <option value="1440p">1440p</option>
+                <option value="4k">4K</option>
+              </select>
+            </div>
           </div>
 
           {error && (

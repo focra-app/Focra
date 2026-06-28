@@ -24,15 +24,21 @@ interface TimelineProps {
 }
 
 export default function Timeline({ videoRef }: TimelineProps) {
-  const { project, currentTime, selectedZoomId, isPlaying, setCurrentTime, setTrimPoints, selectZoom, updateZoom } =
+  const { project, currentTime, selectedZoomId, isPlaying, setCurrentTime, setTrimPoints, selectZoom, updateZoom, updateAnnotation } =
     useEditorStore()
   const containerRef = useRef<HTMLDivElement>(null)
   const isDraggingPlayhead = useRef(false)
   const isDraggingTrimIn = useRef(false)
   const isDraggingTrimOut = useRef(false)
   const isDraggingZoom = useRef<string | null>(null)
+  const isDraggingZoomResizeLeft = useRef<string | null>(null)
+  const isDraggingZoomResizeRight = useRef<string | null>(null)
+  const isDraggingAnnotation = useRef<string | null>(null)
+
   const dragStartX = useRef(0)
   const dragStartTime = useRef(0)
+  const dragStartDuration = useRef(0)
+  
   const [timelineZoom, setTimelineZoom] = useState(1)
 
   if (!project) return null
@@ -102,6 +108,7 @@ export default function Timeline({ videoRef }: TimelineProps) {
     e.preventDefault()
     e.stopPropagation()
     dragStartX.current = e.clientX
+    
     if (type === 'playhead') {
       isDraggingPlayhead.current = true
       dragStartTime.current = currentTime
@@ -116,6 +123,22 @@ export default function Timeline({ videoRef }: TimelineProps) {
       const kf = project.zoomKeyframes.find((k) => k.id === id)
       dragStartTime.current = kf?.time ?? 0
       selectZoom(id)
+    } else if (type === 'zoom-resize-left' && id) {
+      isDraggingZoomResizeLeft.current = id
+      const kf = project.zoomKeyframes.find((k) => k.id === id)
+      dragStartTime.current = kf?.time ?? 0
+      dragStartDuration.current = kf?.duration ?? 0
+      selectZoom(id)
+    } else if (type === 'zoom-resize-right' && id) {
+      isDraggingZoomResizeRight.current = id
+      const kf = project.zoomKeyframes.find((k) => k.id === id)
+      dragStartTime.current = kf?.time ?? 0
+      dragStartDuration.current = kf?.duration ?? 0
+      selectZoom(id)
+    } else if (type === 'annotation' && id) {
+      isDraggingAnnotation.current = id
+      const ann = project.annotations.find((a) => a.id === id)
+      dragStartTime.current = ann?.time ?? 0
     }
   }, [currentTime, inPoint, outPoint, project, selectZoom])
 
@@ -126,11 +149,17 @@ export default function Timeline({ videoRef }: TimelineProps) {
         || isDraggingTrimIn.current
         || isDraggingTrimOut.current
         || isDraggingZoom.current
+        || isDraggingZoomResizeLeft.current
+        || isDraggingZoomResizeRight.current
+        || isDraggingAnnotation.current
       ) {
         nudgeScrollDuringDrag(e.clientX, e.clientY)
       }
 
       const t = timeFromX(e.clientX)
+      const dx = e.clientX - dragStartX.current
+      const dt = dx / pixelsPerSecond
+
       if (isDraggingPlayhead.current) {
         setCurrentTime(t)
         if (videoRef.current) videoRef.current.currentTime = t
@@ -141,10 +170,22 @@ export default function Timeline({ videoRef }: TimelineProps) {
         setTrimPoints({ inPoint, outPoint: Math.max(t, inPoint + 0.5) })
       } else if (isDraggingZoom.current) {
         const id = isDraggingZoom.current
-        const dx = e.clientX - dragStartX.current
-        const dt = dx / pixelsPerSecond
         const newTime = Math.max(0, Math.min(duration, dragStartTime.current + dt))
         updateZoom(id, { time: newTime })
+      } else if (isDraggingZoomResizeLeft.current) {
+        const id = isDraggingZoomResizeLeft.current
+        const maxTime = dragStartTime.current + dragStartDuration.current - 0.2
+        const newTime = Math.min(maxTime, Math.max(0, dragStartTime.current + dt))
+        const newDuration = (dragStartTime.current + dragStartDuration.current) - newTime
+        updateZoom(id, { time: newTime, duration: newDuration })
+      } else if (isDraggingZoomResizeRight.current) {
+        const id = isDraggingZoomResizeRight.current
+        const newDuration = Math.max(0.2, dragStartDuration.current + dt)
+        updateZoom(id, { duration: newDuration })
+      } else if (isDraggingAnnotation.current) {
+        const id = isDraggingAnnotation.current
+        const newTime = Math.max(0, Math.min(duration, dragStartTime.current + dt))
+        updateAnnotation(id, { time: newTime })
       }
     }
     const onMouseUp = () => {
@@ -152,6 +193,9 @@ export default function Timeline({ videoRef }: TimelineProps) {
       isDraggingTrimIn.current = false
       isDraggingTrimOut.current = false
       isDraggingZoom.current = null
+      isDraggingZoomResizeLeft.current = null
+      isDraggingZoomResizeRight.current = null
+      isDraggingAnnotation.current = null
     }
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', onMouseUp)
@@ -169,6 +213,7 @@ export default function Timeline({ videoRef }: TimelineProps) {
     setCurrentTime,
     setTrimPoints,
     updateZoom,
+    updateAnnotation,
     videoRef
   ])
 
@@ -177,7 +222,6 @@ export default function Timeline({ videoRef }: TimelineProps) {
     keepPointVisible(currentTime * pixelsPerSecond)
   }, [currentTime, isPlaying, keepPointVisible, pixelsPerSecond])
 
-  // Ruler ticks
   const ticks: number[] = []
   const majorStep = duration > 60 ? 10 : duration > 30 ? 5 : 2
   for (let t = 0; t <= duration; t += majorStep) ticks.push(t)
@@ -189,7 +233,6 @@ export default function Timeline({ videoRef }: TimelineProps) {
 
   return (
     <div className="flex flex-col bg-bg-secondary border-t border-border select-none" style={{ height: 224 }}>
-      {/* Header */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border flex-shrink-0">
         <Scissors size={13} className="text-text-secondary" />
         <span className="text-xs text-text-secondary font-medium">Timeline</span>
@@ -226,20 +269,25 @@ export default function Timeline({ videoRef }: TimelineProps) {
         </div>
       </div>
 
-      {/* Scrollable timeline */}
       <div
         ref={containerRef}
         className="flex-1 overflow-auto relative"
         onWheel={(e) => {
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault()
+            const delta = e.deltaY > 0 ? -0.2 : 0.2
+            setTimelineZoom((prev) => clampTimelineZoom(prev + delta))
+            return
+          }
           if (!e.shiftKey || !containerRef.current) return
           e.preventDefault()
           containerRef.current.scrollLeft += e.deltaY
         }}
       >
         <div style={{ width: totalWidth + 80, height: contentHeight, position: 'relative' }}>
-          {/* Ruler */}
+          {/* Ruler Background */}
           <div
-            className="absolute top-0 left-0 right-0 bg-bg-tertiary border-b border-border"
+            className="absolute top-0 left-0 right-0 bg-bg-tertiary border-b border-border cursor-text hover:bg-[#202020]"
             style={{ height: RULER_HEIGHT, zIndex: 2 }}
             onMouseDown={(e) => {
               const t = timeFromX(e.clientX)
@@ -260,7 +308,6 @@ export default function Timeline({ videoRef }: TimelineProps) {
             ))}
           </div>
 
-          {/* Trim overlay: dim trimmed areas */}
           <div
             className="absolute bg-bg-primary/60 pointer-events-none"
             style={{ top: RULER_HEIGHT, left: 0, width: inX, bottom: 0, zIndex: 1 }}
@@ -270,12 +317,10 @@ export default function Timeline({ videoRef }: TimelineProps) {
             style={{ top: RULER_HEIGHT, left: outX, right: 0, bottom: 0, zIndex: 1 }}
           />
 
-          {/* Video clip track */}
           <div
             className="absolute left-0 right-0"
             style={{ top: RULER_HEIGHT, height: TRACK_HEIGHT }}
           >
-            {/* Clip bar */}
             <div
               className="absolute bg-accent/30 border border-accent/50 rounded overflow-hidden"
               style={{ left: 0, width: totalWidth, top: 6, height: TRACK_HEIGHT - 12, minWidth: 32 }}
@@ -284,19 +329,15 @@ export default function Timeline({ videoRef }: TimelineProps) {
                 <span className="text-[10px] text-accent truncate">Video Clip</span>
               </div>
             </div>
-
-            {/* Trim In handle */}
             <div
-              className="absolute top-0 bottom-0 w-3 bg-accent cursor-ew-resize rounded-l flex items-center justify-center"
+              className="absolute top-0 bottom-0 w-3 bg-accent cursor-ew-resize rounded-l flex items-center justify-center hover:bg-accent-hover transition-colors"
               style={{ left: inX - 6, zIndex: 3 }}
               onMouseDown={(e) => handleMouseDown(e, 'trimIn')}
             >
               <div className="w-0.5 h-4 bg-white rounded" />
             </div>
-
-            {/* Trim Out handle */}
             <div
-              className="absolute top-0 bottom-0 w-3 bg-accent cursor-ew-resize rounded-r flex items-center justify-center"
+              className="absolute top-0 bottom-0 w-3 bg-accent cursor-ew-resize rounded-r flex items-center justify-center hover:bg-accent-hover transition-colors"
               style={{ left: outX - 6, zIndex: 3 }}
               onMouseDown={(e) => handleMouseDown(e, 'trimOut')}
             >
@@ -304,7 +345,6 @@ export default function Timeline({ videoRef }: TimelineProps) {
             </div>
           </div>
 
-          {/* Zoom keyframes track */}
           <div
             className="absolute left-0 right-0"
             style={{ top: RULER_HEIGHT + TRACK_HEIGHT, height: ZOOM_TRACK_HEIGHT }}
@@ -317,19 +357,30 @@ export default function Timeline({ videoRef }: TimelineProps) {
               return (
                 <div
                   key={kf.id}
-                  className={`absolute top-2 rounded text-[9px] font-medium px-1 flex items-center gap-0.5 cursor-pointer transition-colors
-                    ${isSelected ? 'bg-accent text-white' : 'bg-accent/40 text-accent hover:bg-accent/60'}`}
+                  className={`absolute top-2 rounded text-[9px] font-medium flex items-center gap-0.5 cursor-grab active:cursor-grabbing transition-colors group
+                    ${isSelected ? 'bg-accent text-white border border-accent/50' : 'bg-accent/40 text-accent hover:bg-accent/60 border border-transparent'}`}
                   style={{ left: kx, width: Math.max(kw, 20), bottom: 2 }}
                   onMouseDown={(e) => handleMouseDown(e, 'zoom', kf.id)}
                 >
-                  <ZoomIn size={10} />
-                  <span className="truncate">{kf.scale.toFixed(1)}x</span>
+                  <div 
+                    className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/20 transition-colors rounded-l" 
+                    onMouseDown={(e) => handleMouseDown(e, 'zoom-resize-left', kf.id)} 
+                  />
+                  
+                  <div className="flex-1 flex items-center gap-1 px-1 overflow-hidden pointer-events-none">
+                    <ZoomIn size={10} className="flex-shrink-0" />
+                    <span className="truncate">{kf.scale.toFixed(1)}x</span>
+                  </div>
+                  
+                  <div 
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/20 transition-colors rounded-r" 
+                    onMouseDown={(e) => handleMouseDown(e, 'zoom-resize-right', kf.id)} 
+                  />
                 </div>
               )
             })}
           </div>
 
-          {/* Annotation markers track */}
           <div
             className="absolute left-0 right-0"
             style={{ top: RULER_HEIGHT + TRACK_HEIGHT + ZOOM_TRACK_HEIGHT, height: ANNOTATION_TRACK_HEIGHT }}
@@ -340,22 +391,22 @@ export default function Timeline({ videoRef }: TimelineProps) {
               return (
                 <div
                   key={ann.id}
-                  className="absolute top-2 bottom-2 w-3 rounded-sm cursor-pointer"
-                  style={{ left: ax, backgroundColor: ann.color }}
+                  className="absolute top-2 bottom-2 w-3 rounded-sm cursor-grab active:cursor-grabbing hover:brightness-125 transition-all"
+                  style={{ left: ax, backgroundColor: ann.color, transform: 'translateX(-50%)' }}
                   title={ann.type === 'text' ? ann.text : 'Arrow'}
+                  onMouseDown={(e) => handleMouseDown(e, 'annotation', ann.id)}
                 />
               )
             })}
           </div>
 
-          {/* Playhead */}
           <div
-            className="absolute top-0 bottom-0 cursor-ew-resize"
+            className="absolute top-0 bottom-0 cursor-ew-resize hover:bg-white/10 group transition-colors"
             style={{ left: playheadX, zIndex: 10, transform: 'translateX(-1px)' }}
             onMouseDown={(e) => handleMouseDown(e, 'playhead')}
           >
-            <div className="w-4 h-4 bg-white rounded-full -translate-x-1.5 mt-1 shadow-md" />
-            <div className="w-0.5 bg-white h-full -translate-x-px" />
+            <div className="w-4 h-4 bg-white rounded-full -translate-x-1.5 mt-1 shadow-md scale-100 group-hover:scale-110 transition-transform" />
+            <div className="w-0.5 bg-white h-full -translate-x-px group-hover:bg-accent-hover transition-colors shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
           </div>
         </div>
       </div>

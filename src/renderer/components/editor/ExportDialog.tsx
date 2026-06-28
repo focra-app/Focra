@@ -1,6 +1,7 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile } from '@ffmpeg/util'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
+import { motion } from 'framer-motion'
 import { Download, X, Check } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
 import type { EditorProject, ExportSettings, ZoomKeyframe } from '../../types'
@@ -623,12 +624,14 @@ async function renderVideoWithEffects(
 
       await new Promise<void>((resolve, reject) => {
         let isFinishing = false
-        let intervalId: ReturnType<typeof setInterval>
+        let rafId: number
+        let lastFrameTime = performance.now()
+        const frameIntervalMs = 1000 / settings.fps
 
         const finish = async () => {
           if (isFinishing) return
           isFinishing = true
-          clearInterval(intervalId)
+          if (rafId) cancelAnimationFrame(rafId)
           
           // Small delay to let the recorder catch the last few frames/audio chunks
           await new Promise(r => setTimeout(r, 200))
@@ -648,9 +651,17 @@ async function renderVideoWithEffects(
           return false
         }
 
-        const processFrame = () => {
+        const processFrame = (now: DOMHighResTimeStamp) => {
           if (isFinishing) return
           if (checkEnd()) return
+
+          rafId = requestAnimationFrame(processFrame)
+
+          const elapsed = now - lastFrameTime
+          if (elapsed < frameIntervalMs) return
+
+          // Prevent drift by advancing in intervals of frameIntervalMs
+          lastFrameTime = now - (elapsed % frameIntervalMs)
 
           const renderTime = audioVideo.currentTime
           const progress = Math.max(0, Math.min(0.99, (renderTime - startTime) / totalExportDuration))
@@ -678,8 +689,7 @@ async function renderVideoWithEffects(
         audioVideo.onended = finish
         audioVideo.onerror = (_e) => reject(new Error('Playback error during export'))
 
-        const frameIntervalMs = 1000 / settings.fps
-        intervalId = setInterval(processFrame, frameIntervalMs)
+        rafId = requestAnimationFrame(processFrame)
 
         // Safety timeout (duration + 60s) in case the video gets stuck
         setTimeout(() => {
@@ -715,10 +725,11 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [exportProgress, setExportProgress] = useState(0)
-  const [exportDetail, setExportDetail] = useState<string | null>(null)
+  const [exportDetail, setExportDetail] = useState('Initializing...')
+  const cancelExportRef = useRef(false)
 
-  if (!project) return null
-  const settings = project.exportSettings
+  // Use fallback if settings are missing to prevent crash
+  const settings = project?.exportSettings || DEFAULT_EXPORT_SETTINGS
 
   const update = (partial: Partial<ExportSettings>) => {
     setExportSettings({ ...settings, ...partial })
@@ -758,22 +769,25 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
       let finalBuffer = exportedBuffer
 
       if (filteredOption.value === 'mp4' && mimeType.includes('webm')) {
-        setExportDetail('Remuxing WebM to MP4... This may take a moment.')
+        setExportDetail('Transcoding to MP4 (H.264 natively)... This may take a few minutes.')
         try {
-          const ffmpeg = new FFmpeg()
-          await ffmpeg.load()
-          await ffmpeg.writeFile('input.webm', await fetchFile(new Blob([exportedBuffer], { type: mimeType })))
-          await ffmpeg.exec(['-i', 'input.webm', '-c', 'copy', 'output.mp4'])
-          const data = await ffmpeg.readFile('output.mp4')
-          // Avoid unnecessary copy if the Uint8Array spans the full ArrayBuffer.
-          // Otherwise, slice to ensure IPC writes only the relevant byte range.
-          finalBuffer =
-            data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
-              ? data.buffer
-              : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+          if (cancelExportRef.current) throw new Error('Export canceled.')
+          
+          const transcodedArrayBuffer = await window.electronAPI.transcodeVideo(
+            exportedBuffer,
+            { fps: settings.fps },
+            (progress) => {
+              setExportDetail(`Transcoding to MP4... ${Math.round(progress * 100)}%`)
+            }
+          )
+          
+          if (cancelExportRef.current) throw new Error('Export canceled.')
+
+          finalBuffer = transcodedArrayBuffer
           finalExtension = 'mp4'
-        } catch (e) {
-          console.error('MP4 Remux failed, saving as WebM fallback.', e)
+        } catch (e: any) {
+          if (e.message === 'Export canceled.') throw e;
+          console.error('MP4 Native Transcode failed, saving as WebM fallback.', e)
           setExportDetail('MP4 conversion failed, falling back to WebM.')
           finalExtension = 'webm'
         }
@@ -812,8 +826,19 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
-      <div className="bg-bg-secondary rounded-2xl border border-border w-[520px] shadow-2xl animate-slide-up">
+    <motion.div 
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }} 
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50"
+    >
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+        className="bg-bg-secondary rounded-2xl border border-border w-[520px] shadow-2xl"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div className="flex items-center gap-2">
@@ -961,7 +986,7 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }
