@@ -296,10 +296,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       let recorder: MediaRecorder
       try {
+        const hasAudio = combinedStream.getAudioTracks().length > 0
         recorder = new MediaRecorder(combinedStream, {
-          mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-            ? 'video/webm;codecs=vp9,opus'
-            : 'video/webm',
+          mimeType: hasAudio
+            ? (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm')
+            : (MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm'),
           videoBitsPerSecond,
           audioBitsPerSecond: AUDIO_BITRATE
         })

@@ -17,7 +17,8 @@ function createWindow(): BrowserWindow {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      autoplayPolicy: 'no-user-gesture-required'
     },
     show: false
   })

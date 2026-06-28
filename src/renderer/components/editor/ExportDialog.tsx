@@ -51,7 +51,7 @@ const FORMAT_OPTIONS: ExportFormatOption[] = [
     value: 'mp4',
     label: 'MP4 (H.264)',
     extension: 'mp4',
-    mimeTypes: ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4']
+    mimeTypes: ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm']
   }
 ]
 
