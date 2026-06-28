@@ -313,46 +313,45 @@ async function seekTo(video: HTMLVideoElement, time: number) {
 // to confirm the frame is ready, draw the canvas, and push it to MediaRecorder.
 // ---------------------------------------------------------------------------
 
-/** Wait for the video decoder to settle on the frame we just seeked to.
- *  Uses requestVideoFrameCallback when available (Chromium 86+, Electron 14+)
- *  for frame-accurate confirmation, falls back to seeked + one rAF tick. */
-function waitForDecodedFrame(video: HTMLVideoElement): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
+/**
+ * Seek `video` to `time` and wait until the decoded frame is ready for
+ * drawImage. Uses the 'seeked' event, which is the correct signal for a
+ * *paused* video element — requestVideoFrameCallback only fires during active
+ * playback and would time-out every frame on a paused element.
+ *
+ * One rAF tick after 'seeked' gives the browser a chance to composite the
+ * decoded pixel data into the element before we call drawImage.
+ */
+async function seekToFrame(video: HTMLVideoElement, time: number): Promise<void> {
+  // Already at this timestamp with data available — nothing to do.
+  if (Math.abs(video.currentTime - time) < 0.0001 && video.readyState >= 2) {
+    return
+  }
+
+  await new Promise<void>((resolve, reject) => {
     const timeoutId = window.setTimeout(() => {
+      video.removeEventListener('error', onError)
       reject(new Error('Timed out waiting for decoded video frame'))
     }, MEDIA_EVENT_TIMEOUT_MS)
 
-    const done = () => {
+    const onError = () => {
       window.clearTimeout(timeoutId)
-      resolve()
+      reject(new Error('Video error during seek'))
     }
 
-    // requestVideoFrameCallback fires only after the compositor has a new
-    // decoded frame ready at currentTime — far more reliable than 'seeked',
-    // which fires before decoding completes on many codecs.
-    if (typeof (video as any).requestVideoFrameCallback === 'function') {
-      ;(video as any).requestVideoFrameCallback(done)
-    } else {
-      // Fallback: 'seeked' + one rAF tick to let the frame paint to the element.
-      const onSeeked = () => {
-        video.removeEventListener('seeked', onSeeked)
-        requestAnimationFrame(done)
-      }
-      video.addEventListener('seeked', onSeeked, { once: true })
-    }
+    // 'seeked' fires when the seek has completed and the frame at currentTime
+    // is decoded. One rAF tick lets the compositor finish painting it.
+    video.addEventListener('seeked', () => {
+      requestAnimationFrame(() => {
+        window.clearTimeout(timeoutId)
+        video.removeEventListener('error', onError)
+        resolve()
+      })
+    }, { once: true })
+
+    video.addEventListener('error', onError, { once: true })
+    video.currentTime = time
   })
-}
-
-/** Seek to `time` and wait for the decoded frame to be available. */
-async function seekToFrame(video: HTMLVideoElement, time: number): Promise<void> {
-  if (Math.abs(video.currentTime - time) < 0.0001) {
-    // Already on this frame — still wait for rVFC so we know it’s decoded.
-    await waitForDecodedFrame(video)
-    return
-  }
-  const frameReady = waitForDecodedFrame(video)
-  video.currentTime = time
-  await frameReady
 }
 
 async function loadBackgroundImage(project: EditorProject): Promise<HTMLImageElement | null> {
