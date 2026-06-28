@@ -1,18 +1,12 @@
 import { ipcMain, dialog, BrowserWindow, screen } from 'electron'
 import { randomUUID } from 'crypto'
-import fs from 'fs'
-import path from 'path'
-import os from 'os'
-import ffmpeg from 'fluent-ffmpeg'
-import ffmpegInstaller from '@ffmpeg-installer/ffmpeg'
 import { getDesktopSources, generateAutoZoomKeyframes, saveVideoFile } from './recorder'
 import type { CaptureBounds, MouseEvent } from './recorder'
 
-// Configure ffmpeg path
-ffmpeg.setFfmpegPath(ffmpegInstaller.path)
-
 // One-time tokens for secure file saving: token → { filePath, expiresAt }
-const TOKEN_TTL_MS = 5 * 60 * 1000 // 5 minutes
+// 30 minutes: the save dialog is shown before rendering starts, so the token
+// must survive the full render + transcode + write cycle on slow hardware.
+const TOKEN_TTL_MS = 30 * 60 * 1000 // 30 minutes
 const pendingSavePaths = new Map<string, { filePath: string; expiresAt: number }>()
 
 // Periodically remove tokens that were never redeemed (e.g. user cancelled export)
@@ -252,45 +246,4 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('transcode-video', async (event, inputBuffer: ArrayBuffer, options: { fps: number }) => {
-    const tempDir = os.tmpdir()
-    const inputPath = path.join(tempDir, `focra-input-${Date.now()}.webm`)
-    const outputPath = path.join(tempDir, `focra-output-${Date.now()}.mp4`)
-
-    fs.writeFileSync(inputPath, Buffer.from(inputBuffer))
-
-    return new Promise((resolve, reject) => {
-      ffmpeg(inputPath)
-        .outputOptions([
-          '-c:v libx264',
-          '-preset ultrafast',
-          '-crf 23',
-          `-r ${options.fps}`,
-          '-c:a aac'
-        ])
-        .on('progress', (progress) => {
-          const percent = progress.percent || 0
-          event.sender.send('transcode-progress', percent / 100)
-        })
-        .on('end', () => {
-          try {
-            const outBuffer = fs.readFileSync(outputPath)
-            fs.unlinkSync(inputPath)
-            fs.unlinkSync(outputPath)
-            
-            resolve(outBuffer.buffer.slice(outBuffer.byteOffset, outBuffer.byteOffset + outBuffer.byteLength))
-          } catch (e) {
-            reject(e)
-          }
-        })
-        .on('error', (err) => {
-          try {
-            if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath)
-            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath)
-          } catch (e) {}
-          reject(err)
-        })
-        .save(outputPath)
-    })
-  })
 }

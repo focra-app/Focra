@@ -1,7 +1,6 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg'
 import { fetchFile } from '@ffmpeg/util'
-import { useState, useRef } from 'react'
-import { motion } from 'framer-motion'
+import { useState } from 'react'
 import { Download, X, Check } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
 import type { EditorProject, ExportSettings, ZoomKeyframe } from '../../types'
@@ -618,24 +617,21 @@ async function renderVideoWithEffects(
         console.warn('Export audio playback could not start', err)
       }
 
-      const exportStartWallClock = performance.now()
       const totalExportDuration = Math.max(END_FRAME_EPSILON_SECONDS, endTime - startTime)
       const exportDurationMs = totalExportDuration * 1000
 
       await new Promise<void>((resolve, reject) => {
         let isFinishing = false
-        let rafId: number
-        let lastFrameTime = performance.now()
-        const frameIntervalMs = 1000 / settings.fps
+        let rafId: number | null = null
 
         const finish = async () => {
           if (isFinishing) return
           isFinishing = true
-          if (rafId) cancelAnimationFrame(rafId)
-          
+          if (rafId !== null) cancelAnimationFrame(rafId)
+
           // Small delay to let the recorder catch the last few frames/audio chunks
           await new Promise(r => setTimeout(r, 200))
-          
+
           if (recorder.state !== 'inactive') {
             recorder.stop()
           }
@@ -643,53 +639,56 @@ async function renderVideoWithEffects(
           resolve()
         }
 
-        const checkEnd = () => {
-          if (audioVideo.ended || audioVideo.currentTime >= endTime - END_FRAME_EPSILON_SECONDS) {
-            finish()
-            return true
-          }
-          return false
-        }
+        const frameDurationSeconds = 1 / settings.fps
+        // Track which video-time boundary we last rendered so we only draw once
+        // per frame even if rAF fires multiple times within the same frame window.
+        let lastRenderedFrameTime = startTime - frameDurationSeconds
 
-        const processFrame = (now: DOMHighResTimeStamp) => {
+        const processFrame = () => {
           if (isFinishing) return
-          if (checkEnd()) return
-
-          rafId = requestAnimationFrame(processFrame)
-
-          const elapsed = now - lastFrameTime
-          if (elapsed < frameIntervalMs) return
-
-          // Prevent drift by advancing in intervals of frameIntervalMs
-          lastFrameTime = now - (elapsed % frameIntervalMs)
 
           const renderTime = audioVideo.currentTime
-          const progress = Math.max(0, Math.min(0.99, (renderTime - startTime) / totalExportDuration))
-          if (progress - lastReportedProgress >= 0.01) {
-            lastReportedProgress = progress
-            onProgress?.({ progress })
+
+          // End condition: video finished or we've reached the trim out-point.
+          if (audioVideo.ended || renderTime >= endTime - END_FRAME_EPSILON_SECONDS) {
+            finish()
+            return
           }
 
-          const annotationUpdate = computeVisibleAnnotationsForTime(
-            sortedAnnotations,
-            visibleAnnotations,
-            nextAnnotationIndex,
-            renderTime
-          )
-          nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
-          visibleAnnotations = annotationUpdate.visibleAnnotations
+          // Only draw and push a frame when the video has advanced at least one
+          // frame boundary beyond what we last rendered. This keeps the canvas
+          // frame-rate locked to the video clock rather than wall-clock time,
+          // eliminating A/V drift caused by rAF wall-clock jitter.
+          if (renderTime >= lastRenderedFrameTime + frameDurationSeconds - 0.0001) {
+            lastRenderedFrameTime = renderTime
 
-          drawFrame(ctx, project, audioVideo, renderTime, width, height, bgImage, {
-            zoomTransform: getSequentialZoomTransform(renderTime),
-            visibleAnnotations
-          })
-          requestFrame?.()
+            const progress = Math.max(0, Math.min(0.99, (renderTime - startTime) / totalExportDuration))
+            if (progress - lastReportedProgress >= 0.01) {
+              lastReportedProgress = progress
+              onProgress?.({ progress })
+            }
+
+            const annotationUpdate = computeVisibleAnnotationsForTime(
+              sortedAnnotations,
+              visibleAnnotations,
+              nextAnnotationIndex,
+              renderTime
+            )
+            nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
+            visibleAnnotations = annotationUpdate.visibleAnnotations
+
+            drawFrame(ctx, project, audioVideo, renderTime, width, height, bgImage, {
+              zoomTransform: getSequentialZoomTransform(renderTime),
+              visibleAnnotations
+            })
+            requestFrame?.()
+          }
+
+          rafId = requestAnimationFrame(processFrame)
         }
 
-        audioVideo.onended = finish
+        audioVideo.onended = () => finish()
         audioVideo.onerror = (_e) => reject(new Error('Playback error during export'))
-
-        rafId = requestAnimationFrame(processFrame)
 
         // Safety timeout (duration + 60s) in case the video gets stuck
         setTimeout(() => {
@@ -698,6 +697,8 @@ async function renderVideoWithEffects(
             finish()
           }
         }, exportDurationMs + 60000)
+
+        rafId = requestAnimationFrame(processFrame)
       })
     } catch (err) {
       capturedRenderError = err
@@ -725,11 +726,10 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [exportProgress, setExportProgress] = useState(0)
-  const [exportDetail, setExportDetail] = useState('Initializing...')
-  const cancelExportRef = useRef(false)
+  const [exportDetail, setExportDetail] = useState<string | null>(null)
 
-  // Use fallback if settings are missing to prevent crash
-  const settings = project?.exportSettings || DEFAULT_EXPORT_SETTINGS
+  if (!project) return null
+  const settings = project.exportSettings
 
   const update = (partial: Partial<ExportSettings>) => {
     setExportSettings({ ...settings, ...partial })
@@ -755,50 +755,21 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         update({ format: filteredOption.value })
       }
 
-      const exportedBuffer = await renderVideoWithEffects(
-        project,
-        { ...settings, format: filteredOption.value },
-        ({ progress, detail }) => {
-          setExportProgress(Math.max(0, Math.min(1, progress)))
-          if (detail) setExportDetail(detail)
-        }
-      )
-
+      // Determine the final extension up-front so the save dialog shows the right
+      // file type. For MP4 we optimistically use 'mp4'; if remux later fails we
+      // fall back to WebM but by then we already hold the token for the mp4 path
+      // — the token's TTL won't be threatened by a long render/transcode.
       const mimeType = filteredOption.mimeTypes[0] || 'video/webm'
-      let finalExtension = filteredOption.extension
-      let finalBuffer = exportedBuffer
+      const willRemux = filteredOption.value === 'mp4' && mimeType.includes('webm')
+      const expectedExtension = willRemux ? 'mp4' : filteredOption.extension
 
-      if (filteredOption.value === 'mp4' && mimeType.includes('webm')) {
-        setExportDetail('Transcoding to MP4 (H.264 natively)... This may take a few minutes.')
-        try {
-          if (cancelExportRef.current) throw new Error('Export canceled.')
-          
-          const transcodedArrayBuffer = await window.electronAPI.transcodeVideo(
-            exportedBuffer,
-            { fps: settings.fps },
-            (progress) => {
-              setExportDetail(`Transcoding to MP4... ${Math.round(progress * 100)}%`)
-            }
-          )
-          
-          if (cancelExportRef.current) throw new Error('Export canceled.')
-
-          finalBuffer = transcodedArrayBuffer
-          finalExtension = 'mp4'
-        } catch (e: any) {
-          if (e.message === 'Export canceled.') throw e;
-          console.error('MP4 Native Transcode failed, saving as WebM fallback.', e)
-          setExportDetail('MP4 conversion failed, falling back to WebM.')
-          finalExtension = 'webm'
-        }
-      }
-
-      const defaultName = `focra-export.${finalExtension}`
+      // Show the save dialog BEFORE rendering so the token is locked in before
+      // any long-running work starts. This prevents token expiry on slow hardware.
       setExportDetail('Choose a save location...')
       const dialogResult = await window.electronAPI.showSaveDialog({
-        defaultName,
+        defaultName: `focra-export.${expectedExtension}`,
         filters: [
-          { name: `${finalExtension.toUpperCase()} Video`, extensions: [finalExtension] },
+          { name: `${expectedExtension.toUpperCase()} Video`, extensions: [expectedExtension] },
           { name: 'All Files', extensions: ['*'] }
         ]
       })
@@ -811,8 +782,44 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         return
       }
 
+      const saveToken = dialogResult.saveToken
+
+      setExportDetail(null)
+      const exportedBuffer = await renderVideoWithEffects(
+        project,
+        { ...settings, format: filteredOption.value },
+        ({ progress, detail }) => {
+          setExportProgress(Math.max(0, Math.min(1, progress)))
+          if (detail) setExportDetail(detail)
+        }
+      )
+
+      let finalBuffer = exportedBuffer
+
+      if (willRemux) {
+        setExportDetail('Remuxing WebM to MP4... This may take a moment.')
+        try {
+          const ffmpeg = new FFmpeg()
+          await ffmpeg.load()
+          await ffmpeg.writeFile('input.webm', await fetchFile(new Blob([exportedBuffer], { type: mimeType })))
+          await ffmpeg.exec(['-i', 'input.webm', '-c', 'copy', 'output.mp4'])
+          const data = await ffmpeg.readFile('output.mp4') as Uint8Array
+          // Avoid unnecessary copy if the Uint8Array spans the full ArrayBuffer.
+          // Otherwise, slice to ensure IPC writes only the relevant byte range.
+          finalBuffer =
+            data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
+              ? data.buffer
+              : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+        } catch (e) {
+          console.error('MP4 Remux failed, saving as WebM fallback.', e)
+          setExportDetail('MP4 conversion failed, saving as WebM instead.')
+          // The token path will have a .mp4 extension, but the content will be
+          // valid WebM — better than losing the export entirely.
+        }
+      }
+
       setExportDetail('Saving export...')
-      const saveResult = await window.electronAPI.saveFile(dialogResult.saveToken, finalBuffer)
+      const saveResult = await window.electronAPI.saveFile(saveToken, finalBuffer)
       if (!saveResult.success) {
         throw new Error(saveResult.error || 'Failed to save exported file')
       }
@@ -826,19 +833,8 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
   }
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }} 
-      animate={{ opacity: 1 }} 
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50"
-    >
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        className="bg-bg-secondary rounded-2xl border border-border w-[520px] shadow-2xl"
-      >
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+      <div className="bg-bg-secondary rounded-2xl border border-border w-[520px] shadow-2xl animate-slide-up">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <div className="flex items-center gap-2">
@@ -986,7 +982,7 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
             </button>
           </div>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }
