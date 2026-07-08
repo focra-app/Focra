@@ -3,15 +3,8 @@ import { Mic, Volume2, Zap, Video } from 'lucide-react'
 import SourceSelector from '../components/recording/SourceSelector'
 import RecordingControls from '../components/recording/RecordingControls'
 import RecordingPreview from '../components/recording/RecordingPreview'
-import type { CaptureBounds, DesktopSource, RecordingResult, ZoomKeyframe } from '../types'
+import type { CaptureBounds, DesktopSource, RecordingResult, ZoomKeyframe, MouseEventData } from '../types'
 import appLogo from '../assets/focra-logo.svg'
-
-interface MouseEventData {
-  x: number
-  y: number
-  timestamp: number
-  type: 'click' | 'move'
-}
 
 const TARGET_FRAME_RATE = 60
 const MIN_CAPTURE_WIDTH = 1280
@@ -101,6 +94,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   const captureBoundsRef = useRef<CaptureBounds | null>(null)
   const recordingDimensionsRef = useRef<{ width: number; height: number } | null>(null)
   const finalizePromiseRef = useRef<Promise<void> | null>(null)
+  const unsubscribeMouseMoveRef = useRef<(() => void) | null>(null)
 
   // High-quality preview stream when a source is selected
   useEffect(() => {
@@ -164,6 +158,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
   useEffect(() => {
     return () => {
       unsubscribeMouseClickRef.current?.()
+      unsubscribeMouseMoveRef.current?.()
     }
   }, [])
 
@@ -189,35 +184,34 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       else if (recordingResolution === '4k') { idealWidth = 3840; idealHeight = 2160; }
 
       const videoConstraints: any = {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: selectedSource.id,
-          minFrameRate: 30,
-          maxFrameRate: 60
-        }
+        frameRate: { ideal: 60, max: 60 }
       }
 
       if (recordingResolution !== 'auto') {
-        videoConstraints.mandatory.minWidth = idealWidth
-        videoConstraints.mandatory.maxWidth = idealWidth
-        videoConstraints.mandatory.minHeight = idealHeight
-        videoConstraints.mandatory.maxHeight = idealHeight
+        videoConstraints.width = { ideal: idealWidth, max: idealWidth }
+        videoConstraints.height = { ideal: idealHeight, max: idealHeight }
       }
 
       let displayStream: MediaStream
       try {
-        displayStream = await navigator.mediaDevices.getUserMedia({
-          audio: systemAudioEnabled
-            ? { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: selectedSource.id } }
-            : false,
-          video: videoConstraints
+        await window.electronAPI.setRecordingSource(selectedSource.id)
+        
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          audio: systemAudioEnabled,
+          video: {
+            ...videoConstraints,
+            cursor: 'never'
+          }
         })
       } catch (audioError) {
         if (systemAudioEnabled) {
           console.warn('System audio capture failed, retrying without system audio.', audioError)
-          displayStream = await navigator.mediaDevices.getUserMedia({
+          displayStream = await navigator.mediaDevices.getDisplayMedia({
             audio: false,
-            video: videoConstraints
+            video: {
+              ...videoConstraints,
+              cursor: 'never'
+            }
           })
           setSystemAudioEnabled(false)
           setError('System audio unavailable. Recording video only. Check audio permissions.')
@@ -336,20 +330,28 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
       // app windows (i.e. the recorded screen) are captured for auto-zoom.
       if (autoZoomTrackingEnabled) {
         unsubscribeMouseClickRef.current?.()
+        unsubscribeMouseMoveRef.current?.()
         try {
           unsubscribeMouseClickRef.current = window.electronAPI.onMouseClick((data) => {
             if (mediaRecorderRef.current?.state === 'recording') {
-              // Normalize the timestamp to active recording time by subtracting any
-              // accumulated paused duration so keyframes align with the WebM timeline.
               const normalizedTimestamp = Math.max(0, data.timestamp - pausedDurationRef.current)
               mouseEventsRef.current.push({ ...data, timestamp: normalizedTimestamp, type: 'click' })
             }
           })
+          
+          unsubscribeMouseMoveRef.current = window.electronAPI.onMouseMove((data) => {
+            if (mediaRecorderRef.current?.state === 'recording') {
+              const normalizedTimestamp = Math.max(0, data.timestamp - pausedDurationRef.current)
+              mouseEventsRef.current.push({ ...data, timestamp: normalizedTimestamp, type: 'move' })
+            }
+          })
+          
           await window.electronAPI.startMouseTracking(recordingStartTime, captureBounds)
         } catch (mouseTrackingError) {
-          // Mouse tracking failed — tear down the recorder and all acquired resources
           unsubscribeMouseClickRef.current?.()
           unsubscribeMouseClickRef.current = null
+          unsubscribeMouseMoveRef.current?.()
+          unsubscribeMouseMoveRef.current = null
           window.electronAPI.stopMouseTracking()
           cancelRecordingResources()
           throw mouseTrackingError
@@ -415,6 +417,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     window.electronAPI.stopMouseTracking()
     unsubscribeMouseClickRef.current?.()
     unsubscribeMouseClickRef.current = null
+    unsubscribeMouseMoveRef.current?.()
+    unsubscribeMouseMoveRef.current = null
 
     const finalizeRecording = async () => {
       if (finalizePromiseRef.current) return finalizePromiseRef.current
@@ -476,7 +480,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
           const captureWidth = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.width ?? captureBounds?.width ?? 0)
           const captureHeight = Math.max(MIN_CAPTURE_DIMENSION, recordingDimensions?.height ?? captureBounds?.height ?? 0)
 
-          onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth, captureHeight })
+          onRecordingComplete({ videoUrl, videoBlob: blob, duration, zoomKeyframes, captureWidth, captureHeight, cursorEvents: mouseEventsRef.current })
 
           cancelRecordingResources()
         } finally {

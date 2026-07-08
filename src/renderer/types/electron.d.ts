@@ -33,7 +33,6 @@ interface ElectronAPI {
   stopMouseTracking: () => Promise<void>
   /** Subscribe to dwell events emitted by the main process during recording. Returns an unsubscribe fn. */
   onMouseClick: (callback: (data: MouseClickData) => void) => () => void
-  transcodeVideo: (buffer: ArrayBuffer, options: { fps: number }, onProgress?: (progress: number) => void) => Promise<ArrayBuffer>
 }
 
 declare global {

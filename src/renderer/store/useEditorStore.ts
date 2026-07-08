@@ -42,6 +42,7 @@ interface EditorActions {
   setBackground: (background: Background) => void
   setCrop: (crop: CropSettings | null) => void
   setExportSettings: (settings: ExportSettings) => void
+  setCursorSmoothing: (factor: number) => void
 }
 
 export const useEditorStore = create<EditorState & EditorActions>((set) => ({
@@ -161,5 +162,11 @@ export const useEditorStore = create<EditorState & EditorActions>((set) => ({
     set((state) => {
       if (!state.project) return state
       return { project: { ...state.project, exportSettings } }
+    }),
+
+  setCursorSmoothing: (cursorSmoothing) =>
+    set((state) => {
+      if (!state.project) return state
+      return { project: { ...state.project, cursorSmoothing } }
     })
 }))

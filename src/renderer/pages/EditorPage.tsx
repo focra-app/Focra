@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Play, Pause, SkipBack, SkipForward, Download,
-  ChevronLeft, ZoomIn, Type, Image, Crop, MousePointer
+  ChevronLeft, ZoomIn, Type, Crop, MousePointer, Subtitles
 } from 'lucide-react'
 import { useEditorStore } from '../store/useEditorStore'
 import VideoPreview from '../components/editor/VideoPreview'
@@ -10,6 +10,7 @@ import ZoomEditor from '../components/editor/ZoomEditor'
 import AnnotationTools from '../components/editor/AnnotationTools'
 import BackgroundPanel from '../components/editor/BackgroundPanel'
 import ExportDialog from '../components/editor/ExportDialog'
+import CaptionsPanel from '../components/editor/CaptionsPanel'
 import type { RecordingResult } from '../types'
 
 interface EditorPageProps {
@@ -17,7 +18,7 @@ interface EditorPageProps {
   onBack: () => void
 }
 
-type RightPanel = 'zoom' | 'annotations' | 'background' | 'crop'
+type RightPanel = 'zoom' | 'annotations' | 'background' | 'crop' | 'captions'
 
 import { AnimatePresence, motion } from 'framer-motion'
 
@@ -32,6 +33,7 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
   if (selectedZoomId || selectedTool === 'zoom') rightPanel = 'zoom'
   else if (selectedAnnotationId || selectedTool === 'text') rightPanel = 'annotations'
   else if (selectedTool === 'crop') rightPanel = 'crop'
+  else if (selectedTool === 'captions') rightPanel = 'captions'
 
   useEffect(() => {
     loadProject({
@@ -57,7 +59,10 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
   useEffect(() => {
     const video = videoRef.current
     if (!video || !project) return
-    video.src = project.videoUrl
+    if (video.getAttribute('src') !== project.videoUrl) {
+      video.src = project.videoUrl
+      video.load()
+    }
 
     const onTimeUpdate = () => {
       if (!video.paused) {
@@ -160,6 +165,13 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
           >
             <Crop size={15} />
           </button>
+          <button
+            onClick={() => { setSelectedTool('captions'); }}
+            className={`p-1.5 rounded-md transition-colors ${selectedTool === 'captions' ? 'bg-bg-secondary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}
+            title="Auto Captions"
+          >
+            <Subtitles size={15} />
+          </button>
         </div>
 
         <div className="flex-1" />
@@ -210,6 +222,7 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
               {rightPanel === 'annotations' && 'Annotation Properties'}
               {rightPanel === 'background' && 'Project Settings'}
               {rightPanel === 'crop' && 'Crop Settings'}
+              {rightPanel === 'captions' && 'Auto Captions'}
             </h3>
           </div>
 
@@ -273,6 +286,11 @@ export default function EditorPage({ result, onBack }: EditorPageProps) {
                   ))}
                 </div>
               </div>
+                </motion.div>
+              )}
+              {rightPanel === 'captions' && (
+                <motion.div key="captions" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.15 }} className="absolute inset-0 p-4">
+                  <CaptionsPanel />
                 </motion.div>
               )}
             </AnimatePresence>

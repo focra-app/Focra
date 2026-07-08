@@ -1,10 +1,12 @@
-import { FFmpeg } from '@ffmpeg/ffmpeg'
-import { fetchFile } from '@ffmpeg/util'
+import { Muxer, ArrayBufferTarget } from 'mp4-muxer'
+import { Muxer as WebMMuxer, ArrayBufferTarget as WebMArrayBufferTarget } from 'webm-muxer'
 import { useState } from 'react'
 import { Download, X, Check } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
+import { getZoomTransformAtTime, getZoomTransformFromKeyframe, type ZoomTransform } from './zoomTransform'
+import { PixiRenderer } from '../../lib/PixiRenderer'
+import { StreamingVideoDecoder } from '../../lib/StreamingVideoDecoder'
 import type { EditorProject, ExportSettings, ZoomKeyframe } from '../../types'
-import { getZoomTransformAtTime, getZoomTransformFromKeyframe } from './zoomTransform'
 
 interface ExportDialogProps {
   onClose: () => void
@@ -26,7 +28,7 @@ type ExportFormatOption = {
   mimeTypes: string[]
 }
 
-type ZoomTransform = ReturnType<typeof getZoomTransformAtTime>
+
 
 const FORMAT_OPTIONS: ExportFormatOption[] = [
   {
@@ -55,14 +57,7 @@ const FORMAT_OPTIONS: ExportFormatOption[] = [
   }
 ]
 
-const MAX_MOTION_BLUR_PX = 1.5
-const MOTION_BLUR_SCALE_FACTOR = 1.2
-const MIN_VISIBLE_MOTION_BLUR_PX = 0.5
-const MIN_EXPORT_BITRATE = 8_000_000
-const MAX_EXPORT_BITRATE = 140_000_000
-const EXPORT_BITS_PER_PIXEL_PER_FRAME = 0.12
-const RENDER_PADDING_PX = 40
-const RECORDER_TIMESLICE_MS = 1000
+
 const MIN_EXPORT_DURATION_SECONDS = 0.05
 const MEDIA_EVENT_TIMEOUT_MS = 15000
 // ~0.5ms tolerance for floating-point time comparisons near trim boundaries.
@@ -84,9 +79,7 @@ function AspectRatioIcon({ ratio }: { ratio: string }) {
   )
 }
 
-function getZoomTransform(keyframes: ZoomKeyframe[], time: number): ZoomTransform {
-  return getZoomTransformAtTime(keyframes, time)
-}
+
 
 function createSequentialZoomTransformGetter(keyframes: ZoomKeyframe[]) {
   const sorted = [...keyframes].sort((a, b) => a.time - b.time)
@@ -154,70 +147,9 @@ function getFormatOption(format: ExportSettings['format']) {
   return FORMAT_OPTIONS.find((option) => option.value === format) ?? FORMAT_OPTIONS[0]
 }
 
-function getVideoOnlyMimeCandidates(mimeType: string) {
-  const [container, params] = mimeType.split(';')
-  if (!params || !params.includes('codecs=')) {
-    return [mimeType]
-  }
-
-  const match = params.match(/codecs=(?:"([^"]+)"|([^;]+))/i)
-  const codecsValue = (match?.[1] ?? match?.[2] ?? '').trim()
-  if (!codecsValue) {
-    return [container]
-  }
-
-  const codecList = codecsValue.split(',').map((codec) => codec.trim()).filter(Boolean)
-  const videoCodecPrefixes = ['vp8', 'vp9', 'av01', 'avc1', 'hev1', 'hvc1', 'theora', 'mp4v']
-  const videoCodecs = codecList.filter((codec) =>
-    videoCodecPrefixes.some((prefix) => codec.toLowerCase().startsWith(prefix))
-  )
-
-  if (videoCodecs.length === 0) {
-    return [container]
-  }
-
-  return [`${container};codecs=${videoCodecs.join(',')}`, container]
+function isFormatSupportedForExport(_option: ExportFormatOption) {
+  return true
 }
-
-function getSupportedMimeTypeForStream(option: ExportFormatOption, hasAudioTrack: boolean) {
-  const candidates = hasAudioTrack
-    ? option.mimeTypes
-    : option.mimeTypes.flatMap((mimeType) => getVideoOnlyMimeCandidates(mimeType))
-  const uniqueCandidates = Array.from(new Set(candidates))
-  return uniqueCandidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null
-}
-
-function isFormatSupportedForExport(option: ExportFormatOption) {
-  const supportsWithAudio = getSupportedMimeTypeForStream(option, true) !== null
-  const supportsVideoOnly = getSupportedMimeTypeForStream(option, false) !== null
-  return (
-    supportsWithAudio
-    || supportsVideoOnly
-  )
-}
-
-function chooseMimeTypeForCanvasStream(option: ExportFormatOption, canvasStream: MediaStream) {
-  const audioTracks = canvasStream.getAudioTracks()
-  if (audioTracks.length > 0) {
-    const mimeTypeWithAudio = getSupportedMimeTypeForStream(option, true)
-    if (mimeTypeWithAudio) {
-      return mimeTypeWithAudio
-    }
-  }
-
-  const videoOnlyMimeType = getSupportedMimeTypeForStream(option, false)
-  if (!videoOnlyMimeType) {
-    return null
-  }
-
-  for (const track of audioTracks) {
-    canvasStream.removeTrack(track)
-    track.stop()
-  }
-
-  return videoOnlyMimeType
-}
-
 function computeVisibleAnnotationsForTime(
   sortedAnnotations: EditorProject['annotations'],
   currentVisibleAnnotations: EditorProject['annotations'],
@@ -255,7 +187,7 @@ function waitForVideoEvent(
     return Promise.resolve()
   }
   return new Promise((resolve, reject) => {
-    let timeoutId: ReturnType<typeof window.setTimeout> | undefined
+    let timeoutId: number | undefined
 
     const clearListeners = () => {
       video.removeEventListener(eventName, onDone)
@@ -285,21 +217,6 @@ function waitForVideoEvent(
   })
 }
 
-async function ensureVideoReadyForFrame(video: HTMLVideoElement) {
-  if (video.readyState >= 2) return
-  await Promise.race([waitForVideoEvent(video, 'loadeddata'), waitForVideoEvent(video, 'canplay')])
-}
-
-async function seekTo(video: HTMLVideoElement, time: number) {
-  if (Math.abs(video.currentTime - time) < 0.001) {
-    await ensureVideoReadyForFrame(video)
-    return
-  }
-  const seekedPromise = waitForVideoEvent(video, 'seeked')
-  video.currentTime = time
-  await seekedPromise
-  await ensureVideoReadyForFrame(video)
-}
 
 // ---------------------------------------------------------------------------
 // Seek-based offline renderer helpers
@@ -363,191 +280,28 @@ async function loadBackgroundImage(project: EditorProject): Promise<HTMLImageEle
     image.onload = () => resolve(true)
     image.onerror = () => resolve(false)
     // Set src after listeners are attached to avoid missing a cached load event.
-    image.src = background.imageUrl
+    image.src = background.imageUrl || ''
   })
 
   return loaded ? image : null
 }
 
-function drawFrame(
-  ctx: CanvasRenderingContext2D,
-  project: EditorProject,
-  video: HTMLVideoElement,
-  renderTime: number,
-  width: number,
-  height: number,
-  bgImage: HTMLImageElement | null,
-  precomputed?: {
-    zoomTransform?: ZoomTransform
-    visibleAnnotations?: EditorProject['annotations']
-  }
-) {
-  const W = width
-  const H = height
 
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.clearRect(0, 0, W, H)
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-
-  const bg = project.background
-  if (bg.type === 'solid') {
-    ctx.fillStyle = bg.color || '#0f0f0f'
-    ctx.fillRect(0, 0, W, H)
-  } else if (bg.type === 'gradient' && bg.gradient) {
-    const { type, stops, angle = 0 } = bg.gradient
-    let grad: CanvasGradient
-    if (type === 'linear') {
-      const rad = (angle * Math.PI) / 180
-      const x1 = W / 2 - (Math.cos(rad) * W) / 2
-      const y1 = H / 2 - (Math.sin(rad) * H) / 2
-      const x2 = W / 2 + (Math.cos(rad) * W) / 2
-      const y2 = H / 2 + (Math.sin(rad) * H) / 2
-      grad = ctx.createLinearGradient(x1, y1, x2, y2)
-    } else {
-      grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) / 2)
-    }
-    stops.forEach((stop) => grad.addColorStop(stop.position, stop.color))
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, W, H)
-  } else if (bg.type === 'image' && bgImage && bgImage.naturalWidth > 0) {
-    const imgRatio = bgImage.naturalWidth / bgImage.naturalHeight
-    const canvasRatio = W / H
-    let sx = 0
-    let sy = 0
-    let sw = bgImage.naturalWidth
-    let sh = bgImage.naturalHeight
-
-    if (imgRatio > canvasRatio) {
-      sw = bgImage.naturalHeight * canvasRatio
-      sx = (bgImage.naturalWidth - sw) / 2
-    } else {
-      sh = bgImage.naturalWidth / canvasRatio
-      sy = (bgImage.naturalHeight - sh) / 2
-    }
-
-    ctx.drawImage(bgImage, sx, sy, sw, sh, 0, 0, W, H)
-  } else {
-    ctx.fillStyle = '#1a1a1a'
-    ctx.fillRect(0, 0, W, H)
-  }
-
-  if (video.readyState < 2) return
-
-  const { scale, tx, ty, motionBlur } = precomputed?.zoomTransform ?? getZoomTransform(project.zoomKeyframes, renderTime)
-
-  const crop = project.cropSettings
-  const srcX = crop ? crop.x * video.videoWidth : 0
-  const srcY = crop ? crop.y * video.videoHeight : 0
-  const srcW = crop ? crop.width * video.videoWidth : video.videoWidth
-  const srcH = crop ? crop.height * video.videoHeight : video.videoHeight
-
-  const padding = RENDER_PADDING_PX
-  const availW = Math.max(1, W - padding * 2)
-  const availH = Math.max(1, H - padding * 2)
-  const ratio = srcW / srcH
-  let dw = availW
-  let dh = availW / ratio
-  if (dh > availH) {
-    dh = availH
-    dw = availH * ratio
-  }
-  const dx = (W - dw) / 2
-  const dy = (H - dh) / 2
-
-  ctx.save()
-  if (motionBlur) {
-    const blurPixels = Math.min(
-      MAX_MOTION_BLUR_PX,
-      Math.max(0, (scale - 1) * MOTION_BLUR_SCALE_FACTOR)
-    )
-    if (blurPixels >= MIN_VISIBLE_MOTION_BLUR_PX) {
-      ctx.filter = `blur(${blurPixels.toFixed(2)}px)`
-    }
-  }
-
-  ctx.translate(W / 2 + tx * dw, H / 2 + ty * dh)
-  ctx.scale(scale, scale)
-  ctx.translate(-W / 2, -H / 2)
-  ctx.drawImage(video, srcX, srcY, srcW, srcH, dx, dy, dw, dh)
-  ctx.restore()
-
-  const visibleAnnotations = precomputed?.visibleAnnotations
-    ?? project.annotations.filter(
-      (annotation) => renderTime >= annotation.time && renderTime <= annotation.time + annotation.duration
-    )
-
-  for (const annotation of visibleAnnotations) {
-    const ax = annotation.x * W
-    const ay = annotation.y * H
-    ctx.save()
-
-    if (annotation.type === 'text') {
-      ctx.font = `bold ${annotation.fontSize || 24}px -apple-system, sans-serif`
-      ctx.fillStyle = annotation.color
-      ctx.shadowColor = 'rgba(0,0,0,0.5)'
-      ctx.shadowBlur = 4
-      ctx.fillText(annotation.text || '', ax, ay)
-    } else if (annotation.type === 'arrow' && annotation.endX !== undefined && annotation.endY !== undefined) {
-      const ex = annotation.endX * W
-      const ey = annotation.endY * H
-      const sw = annotation.strokeWidth || 3
-      ctx.strokeStyle = annotation.color
-      ctx.lineWidth = sw
-      ctx.lineCap = 'round'
-      ctx.beginPath()
-      ctx.moveTo(ax, ay)
-      ctx.lineTo(ex, ey)
-      ctx.stroke()
-
-      const angle = Math.atan2(ey - ay, ex - ax)
-      const arrowLen = 16
-      ctx.beginPath()
-      ctx.moveTo(ex, ey)
-      ctx.lineTo(ex - arrowLen * Math.cos(angle - 0.4), ey - arrowLen * Math.sin(angle - 0.4))
-      ctx.moveTo(ex, ey)
-      ctx.lineTo(ex - arrowLen * Math.cos(angle + 0.4), ey - arrowLen * Math.sin(angle + 0.4))
-      ctx.stroke()
-    }
-
-    ctx.restore()
-  }
-}
 
 async function renderVideoWithEffects(
   project: EditorProject,
   settings: ExportSettings,
+  saveToken: string,
   onProgress?: (update: ExportProgressUpdate) => void
-): Promise<ArrayBuffer> {
-  const formatOption = getFormatOption(settings.format)
-
-  // Two video elements:
-  //   videoEl  — provides decoded frames for canvas drawing (muted, always paused)
-  //   audioEl  — plays in real-time to supply a live audio track to the stream
-  const videoEl = document.createElement('video')
-  const audioEl = document.createElement('video')
-
-  const cleanupEls = () => {
-    for (const el of [videoEl, audioEl]) {
-      el.pause()
-      el.removeAttribute('src')
-      el.load()
-    }
-  }
+): Promise<void> {
+  const decoder = new StreamingVideoDecoder()
 
   try {
-    // ------------------------------------------------------------------
     // 1. Load metadata
-    // ------------------------------------------------------------------
-    videoEl.src = project.videoUrl
-    videoEl.preload = 'auto'
-    videoEl.muted = true          // never plays audio — pure decode source
-    videoEl.playsInline = true
-    await waitForVideoEvent(videoEl, 'loadedmetadata')
-
-    const loadedVideoDuration = Number.isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration : 0
-    const fallbackProjectDuration = Number.isFinite(project.duration) && project.duration > 0 ? project.duration : 0
-    const mediaDuration = loadedVideoDuration || fallbackProjectDuration
+    onProgress?.({ progress: 0, detail: 'Loading video metadata...' })
+    const metadata = await decoder.loadMetadata(project.videoUrl)
+    
+    const mediaDuration = metadata.duration
     if (mediaDuration <= 0) throw new Error('Unable to determine media duration for export')
 
     const startTime = Math.max(0, Math.min(mediaDuration, project.trimPoints.inPoint))
@@ -560,8 +314,8 @@ async function renderVideoWithEffects(
     const requestedDimensions = getDimensions(settings)
     const { width, height, wasClamped } = clampOutputToSourceDimensions(
       requestedDimensions,
-      videoEl.videoWidth,
-      videoEl.videoHeight
+      metadata.width,
+      metadata.height
     )
     if (wasClamped) {
       onProgress?.({
@@ -570,144 +324,147 @@ async function renderVideoWithEffects(
       })
     }
 
-    // ------------------------------------------------------------------
-    // 2. Canvas + captureStream
-    // ------------------------------------------------------------------
     const canvas = document.createElement('canvas')
     canvas.width = width
     canvas.height = height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) throw new Error('Unable to initialize export renderer')
+    const renderer = new PixiRenderer()
+    await renderer.init(canvas, { width, height })
 
     const bgImage = await loadBackgroundImage(project)
 
-    // Prefer captureStream(0) + requestFrame() so we control when frames are
-    // pushed. Fall back to captureStream(fps) if requestFrame is unavailable.
-    let canvasStream = canvas.captureStream(0)
-    const stopCanvasStreamTracks = () => canvasStream.getTracks().forEach((t) => t.stop())
+    const frameDuration = 1 / settings.fps
+    const totalFrames = Math.ceil(totalDuration / frameDuration)
 
-    let videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
-    if (!videoTrack) { stopCanvasStreamTracks(); throw new Error('Unable to initialize export video track') }
+    const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
+    const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
+    let nextAnnotationIndex = 0
+    let visibleAnnotations: EditorProject['annotations'] = []
 
-    let requestFrame: (() => void) | null =
-      typeof videoTrack.requestFrame === 'function' ? () => videoTrack!.requestFrame() : null
-
-    if (!requestFrame) {
-      stopCanvasStreamTracks()
-      canvasStream = canvas.captureStream(settings.fps)
-      videoTrack = canvasStream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined
-      if (!videoTrack) throw new Error('Unable to initialize export video track (fallback)')
-      requestFrame = typeof videoTrack.requestFrame === 'function' ? () => videoTrack!.requestFrame() : null
-    }
-
-    // ------------------------------------------------------------------
-    // 3. Audio track — a separate real-time playback element
-    //    Plays silently alongside the seek loop so MediaRecorder captures
-    //    a live audio track. The user doesn’t hear it (volume = 0).
-    // ------------------------------------------------------------------
-    let hasAudio = false
-    if (typeof audioEl.captureStream === 'function') {
+    // 2. Fetch original audio to get metadata for Muxer
+    onProgress?.({ progress: 0, detail: 'Extracting audio...' })
+    let audioBuffer: AudioBuffer | null = null
+    let sampleRate = 44100
+    let numberOfChannels = 2
+    
+    try {
+      let audioCtx: AudioContext | null = null
       try {
-        audioEl.src = project.videoUrl
-        audioEl.preload = 'auto'
-        audioEl.muted = false
-        audioEl.volume = 0            // inaudible; stream still carries audio data
-        audioEl.playsInline = true
-        await waitForVideoEvent(audioEl, 'loadedmetadata')
-
-        const audioStream = audioEl.captureStream()
-        const audioTracks = audioStream.getAudioTracks()
-        if (audioTracks.length > 0) {
-          canvasStream = new MediaStream([
-            ...canvasStream.getVideoTracks(),
-            ...audioTracks
-          ])
-          hasAudio = true
+        const audioRes = await fetch(project.videoUrl)
+        const arrayBuffer = await audioRes.arrayBuffer()
+        audioCtx = new window.AudioContext()
+        audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+        sampleRate = audioBuffer.sampleRate
+        numberOfChannels = audioBuffer.numberOfChannels
+      } catch (e) {
+        console.warn('Failed to extract audio, proceeding with video only.', e)
+      } finally {
+        if (audioCtx) {
+          audioCtx.close()
         }
-      } catch {
-        // No audio — continue with video-only export
       }
+    } catch (e) {
+      // Catch any unexpected top-level errors just in case
+      console.warn('Unexpected error extracting audio.', e)
     }
 
-    // ------------------------------------------------------------------
-    // 4. MediaRecorder
-    // ------------------------------------------------------------------
-    const selectedMimeType = chooseMimeTypeForCanvasStream(formatOption, canvasStream)
-    if (!selectedMimeType) throw new Error(`${formatOption.label} export is not supported`)
-    const mimeType = selectedMimeType
+    // 3. Initialize Muxer and Encoders
+    const isMp4 = settings.format === 'mp4'
+    const muxer = isMp4
+      ? new Muxer({
+          target: new ArrayBufferTarget(),
+          video: { codec: 'avc', width, height },
+          audio: audioBuffer ? { codec: 'aac', numberOfChannels, sampleRate } : undefined,
+          fastStart: 'in-memory'
+        })
+      : new WebMMuxer({
+          target: new WebMArrayBufferTarget(),
+          video: { codec: 'V_VP9', width, height },
+          audio: audioBuffer ? { codec: 'V_OPUS', numberOfChannels, sampleRate } : undefined
+        })
 
-    const pixelRate = width * height * settings.fps
-    const videoBitsPerSecond = Math.min(
-      MAX_EXPORT_BITRATE,
-      Math.max(MIN_EXPORT_BITRATE, Math.round(pixelRate * EXPORT_BITS_PER_PIXEL_PER_FRAME))
-    )
-
-    const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond })
-    const recordedChunks: Blob[] = []
-
-    const exportBufferPromise = new Promise<ArrayBuffer>((resolve, reject) => {
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data) }
-      recorder.onerror = () => reject(new Error('Export recording failed'))
-      recorder.onstop = async () => {
-        stopCanvasStreamTracks()
-        try {
-          resolve(await new Blob(recordedChunks, { type: mimeType }).arrayBuffer())
-        } catch (err) {
-          reject(new Error(`Export recording failed: ${String(err)}`))
+    let encoderError: Error | null = null
+    const videoEncoder = new VideoEncoder({
+      output: (chunk, meta) => {
+        if (isMp4) {
+          (muxer as Muxer<ArrayBufferTarget>).addVideoChunk(chunk, meta)
+        } else {
+          (muxer as WebMMuxer<WebMArrayBufferTarget>).addVideoChunk(chunk, meta)
         }
+      },
+      error: (e) => {
+        encoderError = e
       }
     })
 
-    // ------------------------------------------------------------------
-    // 5. Seek-based frame loop
-    //    The video is NEVER played. We seek to each frame’s exact timestamp,
-    //    wait for decoder confirmation, draw, push, advance. Frame-accurate.
-    // ------------------------------------------------------------------
-    let capturedRenderError: unknown = null
-    let recorderStarted = false
+    videoEncoder.configure({
+      codec: isMp4 ? 'avc1.4d002a' : 'vp09.00.10.08',
+      width,
+      height,
+      framerate: settings.fps,
+      bitrate: 8_000_000
+    })
 
-    try {
-      const frameDuration = 1 / settings.fps
-      const totalFrames = Math.ceil(totalDuration / frameDuration)
-
-      const getSequentialZoomTransform = createSequentialZoomTransformGetter(project.zoomKeyframes)
-      const sortedAnnotations = [...project.annotations].sort((a, b) => a.time - b.time)
-      let nextAnnotationIndex = 0
-      let visibleAnnotations: EditorProject['annotations'] = []
-
-      // Seek to startTime and draw frame 0 before starting the recorder,
-      // so the first push is ready immediately when recording begins.
-      await seekToFrame(videoEl, startTime)
-      drawFrame(ctx, project, videoEl, startTime, width, height, bgImage, {
-        zoomTransform: getSequentialZoomTransform(startTime),
-        visibleAnnotations: []
+    // 4. Encode audio if present
+    if (audioBuffer) {
+      const audioEncoder = new AudioEncoder({
+        output: (chunk, meta) => {
+          if (isMp4) {
+            (muxer as Muxer<ArrayBufferTarget>).addAudioChunk(chunk, meta)
+          } else {
+            (muxer as WebMMuxer<WebMArrayBufferTarget>).addAudioChunk(chunk, meta)
+          }
+        },
+        error: (e) => {
+          encoderError = e
+        }
+      })
+      
+      audioEncoder.configure({
+        codec: isMp4 ? 'mp4a.40.2' : 'opus',
+        sampleRate,
+        numberOfChannels,
+        bitrate: 128_000
       })
 
-      recorder.start(RECORDER_TIMESLICE_MS)
-      recorderStarted = true
-      onProgress?.({ progress: 0 })
-
-      // Start audio in sync with the recorder so the stream has audio from frame 1.
-      if (hasAudio) {
-        try {
-          audioEl.currentTime = startTime
-          await audioEl.play()
-        } catch {
-          // Audio play failed — continue video-only
+      const frameSize = isMp4 ? 1024 : 960
+      const startOffset = Math.floor(startTime * sampleRate)
+      const endOffset = Math.floor(endTime * sampleRate)
+      const trimAudioLength = endOffset - startOffset
+      
+      for (let offset = 0; offset < trimAudioLength; offset += frameSize) {
+        const chunkLength = Math.min(frameSize, trimAudioLength - offset)
+        const buffer = new Float32Array(chunkLength * numberOfChannels)
+        for (let channel = 0; channel < numberOfChannels; channel++) {
+          const channelData = audioBuffer.getChannelData(channel)
+          buffer.set(channelData.subarray(startOffset + offset, startOffset + offset + chunkLength), channel * chunkLength)
         }
+        
+        const timestamp = (offset / sampleRate) * 1_000_000
+        const audioData = new AudioData({
+          format: 'f32-planar',
+          sampleRate,
+          numberOfFrames: chunkLength,
+          numberOfChannels,
+          timestamp,
+          data: buffer
+        })
+        audioEncoder.encode(audioData)
+        audioData.close()
       }
+      
+      await audioEncoder.flush()
+    }
 
-      // Push frame 0 (already drawn above).
-      requestFrame?.()
+    if (encoderError) throw encoderError
 
-      // Iterate remaining frames: seek → decode confirm → draw → push.
-      for (let frameIndex = 1; frameIndex < totalFrames; frameIndex++) {
-        const frameTime = Math.min(
-          startTime + frameIndex * frameDuration,
-          endTime - END_FRAME_EPSILON_SECONDS
-        )
+    // 5. Render frames and encode video
+    let currentFrameIndex = 0;
 
-        await seekToFrame(videoEl, frameTime)
+    await decoder.decodeAll(
+      settings.fps,
+      { inPoint: startTime, outPoint: endTime },
+      async (frame: VideoFrame, exportTimestampUs: number, sourceTimestampMs: number) => {
+        const frameTime = sourceTimestampMs / 1000
 
         const annotationUpdate = computeVisibleAnnotationsForTime(
           sortedAnnotations,
@@ -718,37 +475,53 @@ async function renderVideoWithEffects(
         nextAnnotationIndex = annotationUpdate.nextAnnotationIndex
         visibleAnnotations = annotationUpdate.visibleAnnotations
 
-        drawFrame(ctx, project, videoEl, frameTime, width, height, bgImage, {
+        renderer.drawFrame(project, frameTime, frame, bgImage, width, height, {
           zoomTransform: getSequentialZoomTransform(frameTime),
           visibleAnnotations
         })
-        requestFrame?.()
 
-        onProgress?.({ progress: Math.min(0.99, frameIndex / totalFrames) })
+        const canvasFrame = new VideoFrame(canvas, { timestamp: exportTimestampUs })
+        const keyFrame = currentFrameIndex % (settings.fps * 2) === 0 // Keyframe every 2 seconds
+        
+        videoEncoder.encode(canvasFrame, { keyFrame })
+        canvasFrame.close()
+        frame.close() // Close the original frame from decoder
+
+        if (encoderError) throw encoderError
+
+        if (currentFrameIndex % 5 === 0) {
+          await new Promise(r => setTimeout(r, 0)) // Yield to UI
+        }
+        
+        currentFrameIndex++;
+        onProgress?.({ progress: (currentFrameIndex / totalFrames) * 0.9, detail: 'Encoding frames...' })
+      },
+      (warningMsg) => {
+        console.warn(warningMsg)
       }
+    )
 
-      // Let the recorder flush its final internal buffer before stopping.
-      await new Promise<void>((r) => setTimeout(r, 200))
-      if (recorder.state !== 'inactive') recorder.stop()
-      onProgress?.({ progress: 1 })
-    } catch (err) {
-      capturedRenderError = err
-    } finally {
-      audioEl.pause()
-      cleanupEls()
-      if (recorderStarted && recorder.state !== 'inactive') recorder.stop()
-      stopCanvasStreamTracks()
+    onProgress?.({ progress: 0.95, detail: 'Finalizing video...' })
+    await videoEncoder.flush()
+    if (isMp4) {
+      (muxer as Muxer<ArrayBufferTarget>).finalize()
+    } else {
+      (muxer as WebMMuxer<WebMArrayBufferTarget>).finalize()
     }
+    
+    const finalBuffer = isMp4 
+      ? (muxer as Muxer<ArrayBufferTarget>).target.buffer 
+      : (muxer as WebMMuxer<WebMArrayBufferTarget>).target.buffer
 
-    if (capturedRenderError) {
-      try { await exportBufferPromise } catch { /* ignore */ }
-      throw capturedRenderError
-    }
+    onProgress?.({ progress: 0.99, detail: 'Saving file...' })
+    renderer.destroy()
+    const res = await window.electronAPI.saveFile(saveToken, finalBuffer)
+    if (!res.success) throw new Error(res.error || 'Failed to save video')
 
-    return exportBufferPromise
-  } catch (err) {
-    cleanupEls()
-    throw err
+    onProgress?.({ progress: 1, detail: 'Export complete!' })
+
+  } finally {
+    decoder.destroy()
   }
 }
 
@@ -787,13 +560,7 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
         update({ format: filteredOption.value })
       }
 
-      // Determine the final extension up-front so the save dialog shows the right
-      // file type. For MP4 we optimistically use 'mp4'; if remux later fails we
-      // fall back to WebM but by then we already hold the token for the mp4 path
-      // — the token's TTL won't be threatened by a long render/transcode.
-      const mimeType = filteredOption.mimeTypes[0] || 'video/webm'
-      const willRemux = filteredOption.value === 'mp4' && mimeType.includes('webm')
-      const expectedExtension = willRemux ? 'mp4' : filteredOption.extension
+      const expectedExtension = filteredOption.extension
 
       // Show the save dialog BEFORE rendering so the token is locked in before
       // any long-running work starts. This prevents token expiry on slow hardware.
@@ -816,45 +583,16 @@ export default function ExportDialog({ onClose }: ExportDialogProps) {
 
       const saveToken = dialogResult.saveToken
 
-      setExportDetail(null)
-      const exportedBuffer = await renderVideoWithEffects(
+      setExportDetail('Rendering frames...')
+      await renderVideoWithEffects(
         project,
         { ...settings, format: filteredOption.value },
+        saveToken,
         ({ progress, detail }) => {
           setExportProgress(Math.max(0, Math.min(1, progress)))
           if (detail) setExportDetail(detail)
         }
       )
-
-      let finalBuffer = exportedBuffer
-
-      if (willRemux) {
-        setExportDetail('Remuxing WebM to MP4... This may take a moment.')
-        try {
-          const ffmpeg = new FFmpeg()
-          await ffmpeg.load()
-          await ffmpeg.writeFile('input.webm', await fetchFile(new Blob([exportedBuffer], { type: mimeType })))
-          await ffmpeg.exec(['-i', 'input.webm', '-c', 'copy', 'output.mp4'])
-          const data = await ffmpeg.readFile('output.mp4') as Uint8Array
-          // Avoid unnecessary copy if the Uint8Array spans the full ArrayBuffer.
-          // Otherwise, slice to ensure IPC writes only the relevant byte range.
-          finalBuffer =
-            data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
-              ? data.buffer
-              : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
-        } catch (e) {
-          console.error('MP4 Remux failed, saving as WebM fallback.', e)
-          setExportDetail('MP4 conversion failed, saving as WebM instead.')
-          // The token path will have a .mp4 extension, but the content will be
-          // valid WebM — better than losing the export entirely.
-        }
-      }
-
-      setExportDetail('Saving export...')
-      const saveResult = await window.electronAPI.saveFile(saveToken, finalBuffer)
-      if (!saveResult.success) {
-        throw new Error(saveResult.error || 'Failed to save exported file')
-      }
 
       setDone(true)
     } catch (err) {

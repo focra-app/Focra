@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
-import { registerIpcHandlers } from './ipc-handlers'
+import { registerIpcHandlers, getCurrentRecordingSourceId } from './ipc-handlers'
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -12,6 +12,7 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     backgroundColor: '#0f0f0f',
     titleBarStyle: 'hiddenInset',
+    autoHideMenuBar: true,
     trafficLightPosition: { x: 16, y: 16 },
     icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
@@ -26,7 +27,20 @@ function createWindow(): BrowserWindow {
   })
 
   win.once('ready-to-show', () => {
-    win.show()
+    if (process.platform === 'win32') {
+      // Workaround for Windows black screen on startup.
+      // We wait for the first frame to render, then force a DWM repaint with a resize toggle.
+      // We do NOT use setOpacity because it converts the window to a layered window,
+      // which breaks screen recorders capturing this app!
+      win.show()
+      setTimeout(() => {
+        const bounds = win.getBounds()
+        win.setBounds({ width: bounds.width + 1 })
+        win.setBounds(bounds)
+      }, 150)
+    } else {
+      win.show()
+    }
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -40,6 +54,22 @@ function createWindow(): BrowserWindow {
     }
     return { action: 'deny' }
   })
+
+  win.webContents.session.setDisplayMediaRequestHandler(
+    (request, callback) => {
+      const sourceId = getCurrentRecordingSourceId()
+      if (!request.videoRequested || !sourceId) {
+        callback({ video: undefined })
+        return
+      }
+      
+      callback({
+        video: { id: sourceId, name: 'Recording Source' },
+        ...(request.audioRequested && process.platform === 'win32' ? { audio: 'loopback' } : {})
+      })
+    },
+    { useSystemPicker: false }
+  )
 
   if (isDev) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'] || 'http://localhost:5173')

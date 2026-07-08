@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { getDesktopSources, generateAutoZoomKeyframes, saveVideoFile } from './recorder'
 import type { CaptureBounds, MouseEvent } from './recorder'
 
+
 // One-time tokens for secure file saving: token → { filePath, expiresAt }
 // 30 minutes: the save dialog is shown before rendering starts, so the token
 // must survive the full render + transcode + write cycle on slow hardware.
@@ -21,10 +22,15 @@ setInterval(() => {
 
 // Global mouse tracking state
 let mouseTrackingInterval: ReturnType<typeof setInterval> | null = null
+let currentRecordingSourceId: string | null = null
+
+export function getCurrentRecordingSourceId(): string | null {
+  return currentRecordingSourceId
+}
 let lastStablePos = { x: 0, y: 0 }
 let stableFrameCount = 0
 const STABLE_THRESHOLD_PX = 8   // pixels of movement to reset dwell counter
-const DWELL_FRAMES_REQUIRED = 5 // × 100 ms polling = 500 ms dwell → emit event
+const DWELL_FRAMES_REQUIRED = 30 // × 16 ms polling = 480 ms dwell → emit event
 
 function getCaptureBounds(sourceId: string, displayId?: string | null) {
   // Build a virtual desktop rectangle spanning all connected displays.
@@ -193,8 +199,8 @@ export function registerIpcHandlers(): void {
     return getCaptureBounds(sourceId, displayId)
   })
 
-  // Poll the global cursor position so clicks in other app windows are captured.
-  // A "dwell event" (cursor stable for ≥500 ms) is treated as a zoom anchor point.
+  // Poll the global cursor position at ~60Hz (16ms).
+  // Emits 'mouse-move' on every tick, and 'mouse-click' (as a zoom anchor) if dwelt.
   ipcMain.handle('start-mouse-tracking', (_event, recordingStartTime: number, captureBounds: CaptureBounds) => {
     if (mouseTrackingInterval) clearInterval(mouseTrackingInterval)
 
@@ -221,6 +227,13 @@ export function registerIpcHandlers(): void {
         return
       }
 
+      // Always send mouse-move for smooth tracking
+      sender.send('mouse-move', {
+        x: pos.x,
+        y: pos.y,
+        timestamp: Date.now() - recordingStartTime
+      })
+
       const dist = Math.hypot(pos.x - lastStablePos.x, pos.y - lastStablePos.y)
       if (dist < STABLE_THRESHOLD_PX) {
         stableFrameCount++
@@ -236,7 +249,7 @@ export function registerIpcHandlers(): void {
         stableFrameCount = 0
         lastStablePos = pos
       }
-    }, 100)
+    }, 16) // ~60 FPS
   })
 
   ipcMain.handle('stop-mouse-tracking', () => {
@@ -244,6 +257,13 @@ export function registerIpcHandlers(): void {
       clearInterval(mouseTrackingInterval)
       mouseTrackingInterval = null
     }
+    currentRecordingSourceId = null
   })
+
+  ipcMain.handle('set-recording-source', (_event, sourceId: string) => {
+    currentRecordingSourceId = sourceId
+  })
+
+
 
 }

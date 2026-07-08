@@ -228,6 +228,31 @@ export default function BackgroundPanel() {
           )}
         </div>
       )}
+
+      {/* Cursor Smoothing */}
+      <div className="pt-4 border-t border-border space-y-3">
+        <div className="flex items-center gap-2">
+          <Palette size={15} className="text-accent opacity-0" />
+          <span className="text-sm font-semibold text-text-primary">Cursor Tracking</span>
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="label mb-0">Smoothing Factor</span>
+            <span className="text-xs text-text-secondary">
+              {Math.round((project.cursorSmoothing ?? 0.5) * 100)}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={project.cursorSmoothing ?? 0.5}
+            onChange={(e) => useEditorStore.getState().setCursorSmoothing(parseFloat(e.target.value))}
+            className="w-full accent-accent cursor-pointer"
+          />
+        </div>
+      </div>
     </div>
   )
 }

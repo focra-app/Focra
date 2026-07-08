@@ -15,9 +15,24 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()]
   },
   renderer: {
+    worker: {
+      format: 'es',
+      rollupOptions: {
+        output: {
+          inlineDynamicImports: true
+        }
+      }
+    },
+    optimizeDeps: {
+      exclude: ['@xenova/transformers']
+    },
     resolve: {
       alias: {
-        '@': resolve('src/renderer')
+        '@': resolve('src/renderer'),
+        'fs': resolve('src/renderer/lib/vite-stubs/empty-node-module.ts'),
+        'path': resolve('src/renderer/lib/vite-stubs/empty-node-module.ts'),
+        'url': resolve('src/renderer/lib/vite-stubs/empty-node-module.ts'),
+        'onnxruntime-node': resolve('src/renderer/lib/vite-stubs/onnxruntime-node-stub.ts')
       }
     },
     plugins: [react()]

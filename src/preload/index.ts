@@ -62,16 +62,21 @@ const api = {
     return () => ipcRenderer.removeListener('mouse-click', handler)
   },
 
-  transcodeVideo: (buffer: ArrayBuffer, options: { fps: number }, onProgress?: (progress: number) => void): Promise<ArrayBuffer> => {
-    if (onProgress) {
-      const handler = (_event: any, progress: number) => onProgress(progress)
-      ipcRenderer.on('transcode-progress', handler)
-      return ipcRenderer.invoke('transcode-video', buffer, options).finally(() => {
-        ipcRenderer.removeListener('transcode-progress', handler)
-      })
-    }
-    return ipcRenderer.invoke('transcode-video', buffer, options)
-  }
+  onMouseMove: (
+    callback: (data: { x: number; y: number; timestamp: number }) => void
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      data: { x: number; y: number; timestamp: number }
+    ) => callback(data)
+    ipcRenderer.on('mouse-move', handler)
+    return () => ipcRenderer.removeListener('mouse-move', handler)
+  },
+
+  setRecordingSource: (sourceId: string): Promise<void> =>
+    ipcRenderer.invoke('set-recording-source', sourceId)
+
+
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)

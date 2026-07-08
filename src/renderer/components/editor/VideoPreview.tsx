@@ -1,230 +1,145 @@
 import { useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { useEditorStore } from '../../store/useEditorStore'
-import { getZoomTransformAtTime } from './zoomTransform'
+import { PixiRenderer } from '../../lib/PixiRenderer'
 
 interface VideoPreviewProps {
   videoRef: React.RefObject<HTMLVideoElement>
 }
 
 const FALLBACK_CANVAS_DIMENSION = 1
-const MAX_MOTION_BLUR_PX = 1.5
-const MOTION_BLUR_SCALE_FACTOR = 1.2
-const MIN_VISIBLE_MOTION_BLUR_PX = 0.5
 
 export default function VideoPreview({ videoRef }: VideoPreviewProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const animFrameRef = useRef<number>(0)
-  const renderFrameRef = useRef<() => void>(() => {})
-  // Stores CSS-space dimensions for drawing coordinates; backing canvas stays in pixel space.
-  const canvasMetricsRef = useRef({
-    width: FALLBACK_CANVAS_DIMENSION,
-    height: FALLBACK_CANVAS_DIMENSION,
-    devicePixelRatio: 1
-  })
-  // Cache the last-loaded background image so we don't reload on every frame
+  const rendererRef = useRef<PixiRenderer | null>(null)
   const bgImageRef = useRef<{ url: string; img: HTMLImageElement } | null>(null)
   const { project, currentTime, selectedTool, addAnnotation } = useEditorStore()
 
+  // Track if we need to force a redraw because of state changes
+  const forceRenderRef = useRef<() => void>(() => {})
+
   const renderFrame = useCallback(() => {
-    const canvas = canvasRef.current
     const video = videoRef.current
-    const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx || !project) return
+    const renderer = rendererRef.current
+    if (!renderer || !project) return
 
-    const { width: W, height: H } = canvasMetricsRef.current
-    const scaleX = canvas.width / W
-    const scaleY = canvas.height / H
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0)
-    ctx.imageSmoothingEnabled = true
-    ctx.imageSmoothingQuality = 'high'
-
-    // Use video.currentTime while playing for frame-accurate animation;
-    // fall back to the store's currentTime when paused/seeking.
     const renderTime = video && !video.paused && !video.ended ? video.currentTime : currentTime
 
-    // Draw background
+    // Background caching logic
     const bg = project.background
-    if (bg.type === 'solid') {
-      ctx.fillStyle = bg.color || '#0f0f0f'
-      ctx.fillRect(0, 0, W, H)
-    } else if (bg.type === 'gradient' && bg.gradient) {
-      const { type, stops, angle = 0 } = bg.gradient
-      let grad: CanvasGradient
-      if (type === 'linear') {
-        const rad = (angle * Math.PI) / 180
-        const x1 = W / 2 - (Math.cos(rad) * W) / 2
-        const y1 = H / 2 - (Math.sin(rad) * H) / 2
-        const x2 = W / 2 + (Math.cos(rad) * W) / 2
-        const y2 = H / 2 + (Math.sin(rad) * H) / 2
-        grad = ctx.createLinearGradient(x1, y1, x2, y2)
-      } else {
-        grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) / 2)
-      }
-      stops.forEach((s) => grad.addColorStop(s.position, s.color))
-      ctx.fillStyle = grad
-      ctx.fillRect(0, 0, W, H)
-    } else if (bg.type === 'image' && bg.imageUrl) {
-      // Load/cache the background image; render it cover-fitted to the canvas
+    if (bg.type === 'image' && bg.imageUrl) {
       if (bgImageRef.current?.url !== bg.imageUrl) {
-        const img = new Image()
-        img.onload = () => renderFrameRef.current()
+        const img = new window.Image()
+        img.onload = () => forceRenderRef.current()
         img.src = bg.imageUrl
         bgImageRef.current = { url: bg.imageUrl, img }
       }
-      const bgImg = bgImageRef.current?.img
-      if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
-        const imgRatio = bgImg.naturalWidth / bgImg.naturalHeight
-        const canvasRatio = W / H
-        let sx = 0
-        let sy = 0
-        let sw = bgImg.naturalWidth
-        let sh = bgImg.naturalHeight
-        if (imgRatio > canvasRatio) {
-          sw = bgImg.naturalHeight * canvasRatio
-          sx = (bgImg.naturalWidth - sw) / 2
-        } else {
-          sh = bgImg.naturalWidth / canvasRatio
-          sy = (bgImg.naturalHeight - sh) / 2
-        }
-        ctx.drawImage(bgImg, sx, sy, sw, sh, 0, 0, W, H)
-      } else {
-        ctx.fillStyle = '#1a1a1a'
-        ctx.fillRect(0, 0, W, H)
-      }
-    } else {
-      ctx.fillStyle = '#1a1a1a'
-      ctx.fillRect(0, 0, W, H)
     }
 
-    if (video && video.readyState >= 2) {
-      const zoom = getZoomTransformAtTime(project.zoomKeyframes, renderTime)
-      const { scale, tx, ty, motionBlur } = zoom
+    const container = containerRef.current
+    const width = container ? container.clientWidth : 800
+    const height = container ? container.clientHeight : 450
 
-      // Apply crop or use full video
-      const crop = project.cropSettings
-      const srcX = crop ? crop.x * video.videoWidth : 0
-      const srcY = crop ? crop.y * video.videoHeight : 0
-      const srcW = crop ? crop.width * video.videoWidth : video.videoWidth
-      const srcH = crop ? crop.height * video.videoHeight : video.videoHeight
-
-      // Fit video in canvas with padding
-      const padding = 40
-      const availW = W - padding * 2
-      const availH = H - padding * 2
-      const ratio = srcW / srcH
-      let dw = availW
-      let dh = availW / ratio
-      if (dh > availH) {
-        dh = availH
-        dw = availH * ratio
-      }
-      const dx = (W - dw) / 2
-      const dy = (H - dh) / 2
-
-      ctx.save()
-      if (motionBlur) {
-        const blurPixels = Math.min(
-          MAX_MOTION_BLUR_PX,
-          Math.max(0, (scale - 1) * MOTION_BLUR_SCALE_FACTOR)
-        )
-        if (blurPixels >= MIN_VISIBLE_MOTION_BLUR_PX) {
-          ctx.filter = `blur(${blurPixels.toFixed(2)}px)`
-        }
-      }
-      ctx.translate(W / 2 + tx * dw, H / 2 + ty * dh)
-      ctx.scale(scale, scale)
-      ctx.translate(-W / 2, -H / 2)
-      ctx.drawImage(video, srcX, srcY, srcW, srcH, dx, dy, dw, dh)
-      ctx.restore()
-
-      // Draw annotations
-      const visibleAnnotations = project.annotations.filter(
-        (a) => renderTime >= a.time && renderTime <= a.time + a.duration
-      )
-      for (const ann of visibleAnnotations) {
-        const ax = ann.x * W
-        const ay = ann.y * H
-        ctx.save()
-        if (ann.type === 'text') {
-          ctx.font = `bold ${ann.fontSize || 24}px -apple-system, sans-serif`
-          ctx.fillStyle = ann.color
-          ctx.shadowColor = 'rgba(0,0,0,0.5)'
-          ctx.shadowBlur = 4
-          ctx.fillText(ann.text || '', ax, ay)
-        } else if (ann.type === 'arrow' && ann.endX !== undefined && ann.endY !== undefined) {
-          const ex = ann.endX * W
-          const ey = ann.endY * H
-          const sw = ann.strokeWidth || 3
-          ctx.strokeStyle = ann.color
-          ctx.lineWidth = sw
-          ctx.lineCap = 'round'
-          ctx.beginPath()
-          ctx.moveTo(ax, ay)
-          ctx.lineTo(ex, ey)
-          ctx.stroke()
-          // Arrowhead
-          const angle = Math.atan2(ey - ay, ex - ax)
-          const arrowLen = 16
-          ctx.beginPath()
-          ctx.moveTo(ex, ey)
-          ctx.lineTo(ex - arrowLen * Math.cos(angle - 0.4), ey - arrowLen * Math.sin(angle - 0.4))
-          ctx.moveTo(ex, ey)
-          ctx.lineTo(ex - arrowLen * Math.cos(angle + 0.4), ey - arrowLen * Math.sin(angle + 0.4))
-          ctx.stroke()
-        }
-        ctx.restore()
-      }
-    }
+    renderer.draw(
+      project,
+      renderTime,
+      video!,
+      bgImageRef.current?.img || null,
+      width,
+      height
+    )
 
     if (video && !video.paused && !video.ended) {
-      animFrameRef.current = requestAnimationFrame(renderFrameRef.current)
+      animFrameRef.current = requestAnimationFrame(forceRenderRef.current)
     } else {
       animFrameRef.current = 0
     }
   }, [project, currentTime, videoRef])
 
   useEffect(() => {
-    renderFrameRef.current = renderFrame
+    forceRenderRef.current = renderFrame
     if (animFrameRef.current === 0) {
-      renderFrameRef.current()
+      forceRenderRef.current()
     }
   }, [renderFrame])
 
+  // Initialize PixiRenderer
+  useEffect(() => {
+    if (!containerRef.current) return
+    const renderer = new PixiRenderer()
+    rendererRef.current = renderer
+    let isMounted = true
+
+    const init = async () => {
+      await renderer.init(containerRef.current!, {
+        width: containerRef.current!.clientWidth || 800,
+        height: containerRef.current!.clientHeight || 450
+      })
+      if (!isMounted) return
+      if (videoRef.current) {
+        await renderer.loadVideo(videoRef.current)
+      }
+      if (!isMounted) return
+      forceRenderRef.current()
+    }
+    init()
+
+    return () => {
+      isMounted = false
+      renderer.destroy()
+      rendererRef.current = null
+    }
+  }, []) // Empty deps so it runs once on mount
+
+  // Watch for the video element becoming ready to load it into Pixi
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !rendererRef.current) return
+
+    const handleLoadedMetadata = async () => {
+      if (rendererRef.current) {
+        await rendererRef.current.loadVideo(video)
+        forceRenderRef.current()
+      }
+    }
+
+    if (video.readyState >= 1) {
+      handleLoadedMetadata()
+    } else {
+      video.addEventListener('loadedmetadata', handleLoadedMetadata)
+    }
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+    }
+  }, [videoRef, project?.videoUrl]) // Re-run if videoUrl changes
+
   useLayoutEffect(() => {
     const video = videoRef.current
-    const canvas = canvasRef.current
+    const container = containerRef.current
 
     const syncCanvasMetrics = () => {
-      const currentCanvas = canvasRef.current
-      if (!currentCanvas) return false
-
-      const rect = currentCanvas.getBoundingClientRect()
-      const devicePixelRatio = window.devicePixelRatio
+      if (!container) return false
+      const rect = container.getBoundingClientRect()
+      
       const baseCssWidth = Math.max(FALLBACK_CANVAS_DIMENSION, rect.width)
       const baseCssHeight = Math.max(FALLBACK_CANVAS_DIMENSION, rect.height)
-      const pixelWidth = Math.ceil(baseCssWidth * devicePixelRatio)
-      const pixelHeight = Math.ceil(baseCssHeight * devicePixelRatio)
-      const previousMetrics = canvasMetricsRef.current
-      const didCssMetricsChange =
-        previousMetrics.width !== baseCssWidth ||
-        previousMetrics.height !== baseCssHeight ||
-        previousMetrics.devicePixelRatio !== devicePixelRatio
+      
+      const pixelWidth = Math.floor(baseCssWidth)
+      const pixelHeight = Math.floor(baseCssHeight)
 
-      canvasMetricsRef.current = { width: baseCssWidth, height: baseCssHeight, devicePixelRatio }
-      const didPixelSizeChange = currentCanvas.width !== pixelWidth || currentCanvas.height !== pixelHeight
-      if (didPixelSizeChange) {
-        currentCanvas.width = pixelWidth
-        currentCanvas.height = pixelHeight
+      if (rendererRef.current && rendererRef.current.app) {
+        if (rendererRef.current.app.canvas.width !== pixelWidth || rendererRef.current.app.canvas.height !== pixelHeight) {
+          rendererRef.current.app.renderer.resize(pixelWidth, pixelHeight)
+          return true
+        }
       }
-
-      return didCssMetricsChange || didPixelSizeChange
+      return false
     }
 
     const startRenderLoop = () => {
       if (animFrameRef.current === 0) {
-        animFrameRef.current = requestAnimationFrame(renderFrameRef.current)
+        animFrameRef.current = requestAnimationFrame(forceRenderRef.current)
       }
     }
 
@@ -233,34 +148,37 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         cancelAnimationFrame(animFrameRef.current)
         animFrameRef.current = 0
       }
-      renderFrameRef.current()
+      forceRenderRef.current()
     }
 
     syncCanvasMetrics()
+    renderSingleFrame()
 
     const hasResizeObserver = typeof ResizeObserver !== 'undefined'
     let resizeObserver: ResizeObserver | null = null
-    const handleCanvasResize = () => {
-      if (syncCanvasMetrics()) {
-        renderSingleFrame()
-      }
-    }
-    if (hasResizeObserver && canvas) {
+    
+    if (hasResizeObserver && container) {
       resizeObserver = new ResizeObserver(() => {
-        handleCanvasResize()
+        if (syncCanvasMetrics()) {
+          renderSingleFrame()
+        }
       })
-      resizeObserver.observe(canvas)
+      resizeObserver.observe(container)
     }
-    window.addEventListener('resize', handleCanvasResize)
 
-    // Render one frame immediately for initial state / when currentTime changes
-    renderSingleFrame()
+    const handleResize = () => {
+      if (syncCanvasMetrics()) renderSingleFrame()
+    }
+    window.addEventListener('resize', handleResize)
 
     if (video) {
       video.addEventListener('play', startRenderLoop)
       video.addEventListener('pause', renderSingleFrame)
       video.addEventListener('ended', renderSingleFrame)
       video.addEventListener('seeked', renderSingleFrame)
+      video.addEventListener('loadeddata', renderSingleFrame)
+      video.addEventListener('canplay', renderSingleFrame)
+      video.addEventListener('timeupdate', renderSingleFrame)
     }
 
     return () => {
@@ -269,8 +187,11 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
         video.removeEventListener('pause', renderSingleFrame)
         video.removeEventListener('ended', renderSingleFrame)
         video.removeEventListener('seeked', renderSingleFrame)
+        video.removeEventListener('loadeddata', renderSingleFrame)
+        video.removeEventListener('canplay', renderSingleFrame)
+        video.removeEventListener('timeupdate', renderSingleFrame)
       }
-      window.removeEventListener('resize', handleCanvasResize)
+      window.removeEventListener('resize', handleResize)
       resizeObserver?.disconnect()
       if (animFrameRef.current !== 0) {
         cancelAnimationFrame(animFrameRef.current)
@@ -279,10 +200,10 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     }
   }, [videoRef])
 
-  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!project) return
-    const canvas = canvasRef.current!
-    const rect = canvas.getBoundingClientRect()
+    const container = containerRef.current!
+    const rect = container.getBoundingClientRect()
     const x = (e.clientX - rect.left) / rect.width
     const y = (e.clientY - rect.top) / rect.height
 
@@ -300,13 +221,12 @@ export default function VideoPreview({ videoRef }: VideoPreviewProps) {
     })
   }, [project, currentTime, addAnnotation])
 
-  // Only the text tool uses canvas click placement; arrow/crop tools are not yet supported
   const isPlacementTool = selectedTool === 'text'
 
   return (
     <div className="relative w-full bg-black rounded-xl overflow-hidden border border-border">
-      <canvas
-        ref={canvasRef}
+      <div
+        ref={containerRef}
         className="w-full aspect-video"
         onClick={isPlacementTool ? handleCanvasClick : undefined}
         style={{ cursor: isPlacementTool ? 'crosshair' : 'default' }}

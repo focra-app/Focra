@@ -9,6 +9,13 @@ export interface ZoomKeyframe {
   motionBlur: boolean
 }
 
+export interface MouseEventData {
+  x: number
+  y: number
+  timestamp: number
+  type: 'click' | 'move'
+}
+
 export interface Annotation {
   id: string
   type: 'text' | 'arrow'
@@ -22,6 +29,7 @@ export interface Annotation {
   endX?: number
   endY?: number
   strokeWidth?: number
+  annotationSource?: 'auto-caption' | 'manual'
 }
 
 export interface TrimPoints {
@@ -65,6 +73,8 @@ export interface EditorProject {
   exportSettings: ExportSettings
   captureWidth?: number
   captureHeight?: number
+  cursorEvents?: MouseEventData[]
+  cursorSmoothing?: number
 }
 
 export interface DesktopSource {
@@ -89,8 +99,9 @@ export interface RecordingResult {
   zoomKeyframes: ZoomKeyframe[]
   captureWidth: number
   captureHeight: number
+  cursorEvents: MouseEventData[]
 }
 
-export type Tool = 'select' | 'text' | 'arrow' | 'crop'
+export type Tool = 'select' | 'zoom' | 'text' | 'arrow' | 'crop' | 'captions'
 
 export type AppPage = 'record' | 'editor'
