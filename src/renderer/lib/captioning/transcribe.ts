@@ -20,9 +20,6 @@ export type TranscribeWorkerResponse =
   | { type: 'result'; segments: CaptionSegment[]; granularity: CaptionTimestampGranularity }
   | { type: 'error'; message: string }
 
-// @ts-ignore
-import TranscribeWorker from './transcribe.worker?worker'
-
 export function transcribeMono16kToSegments(
   samples: Float32Array,
   options?: {
@@ -35,7 +32,7 @@ export function transcribeMono16kToSegments(
   }
 
   return new Promise<TranscribeMono16kResult>((resolve, reject) => {
-    const worker = new TranscribeWorker()
+    const worker = new Worker(new URL('./transcribe.worker.ts', import.meta.url), { type: 'module' })
 
     let settled = false
     const finish = (fn: () => void) => {

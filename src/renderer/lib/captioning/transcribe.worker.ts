@@ -26,10 +26,11 @@ function withoutNodeVersion<T>(fn: () => Promise<T>): Promise<T> {
   })
 }
 
+// @ts-ignore
+import { pipeline, env } from '@xenova/transformers'
+
 async function loadTranscriber(): Promise<TranscriberFn> {
   return withoutNodeVersion(async () => {
-    // @ts-ignore
-    const { pipeline, env } = await import('@xenova/transformers')
     env.allowLocalModels = true
     const transcriber = (await pipeline(
       'automatic-speech-recognition',
