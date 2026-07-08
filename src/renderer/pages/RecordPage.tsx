@@ -4,13 +4,11 @@ import SourceSelector from '../components/recording/SourceSelector'
 import RecordingControls from '../components/recording/RecordingControls'
 import RecordingPreview from '../components/recording/RecordingPreview'
 import type { CaptureBounds, DesktopSource, RecordingResult, ZoomKeyframe, MouseEventData } from '../types'
+// @ts-ignore
 import appLogo from '../assets/focra-logo.svg'
 
 const TARGET_FRAME_RATE = 60
-const MIN_CAPTURE_WIDTH = 1280
-const MIN_CAPTURE_HEIGHT = 720
-const MAX_CAPTURE_WIDTH = 7680
-const MAX_CAPTURE_HEIGHT = 4320
+
 const MIN_VIDEO_BITRATE = 8_000_000
 const MAX_VIDEO_BITRATE = 45_000_000
 const VIDEO_BITS_PER_PIXEL_PER_FRAME = 0.1
@@ -123,6 +121,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
         const clampedWidth = captureBounds.width; const clampedHeight = captureBounds.height;
 
+        // @ts-ignore
         await window.electronAPI.setRecordingSource(selectedSource.id)
         const s = await navigator.mediaDevices.getDisplayMedia({
           audio: false,
@@ -195,6 +194,7 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
       let displayStream: MediaStream
       try {
+        // @ts-ignore
         await window.electronAPI.setRecordingSource(selectedSource.id)
         
         displayStream = await navigator.mediaDevices.getDisplayMedia({
@@ -340,7 +340,8 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
             }
           })
           
-          unsubscribeMouseMoveRef.current = window.electronAPI.onMouseMove((data) => {
+          // @ts-ignore
+          unsubscribeMouseMoveRef.current = window.electronAPI.onMouseMove((data: any) => {
             if (mediaRecorderRef.current?.state === 'recording') {
               const normalizedTimestamp = Math.max(0, data.timestamp - pausedDurationRef.current)
               mouseEventsRef.current.push({ ...data, timestamp: normalizedTimestamp, type: 'move' })

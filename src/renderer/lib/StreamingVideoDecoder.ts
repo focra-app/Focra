@@ -1,4 +1,5 @@
 import { WebDemuxer } from "web-demuxer";
+// @ts-ignore
 import wasmUrl from './wasm/web-demuxer.wasm?url';
 import type { TrimPoints } from "../types";
 

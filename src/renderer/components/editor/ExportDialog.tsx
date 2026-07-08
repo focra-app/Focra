@@ -3,7 +3,7 @@ import { Muxer as WebMMuxer, ArrayBufferTarget as WebMArrayBufferTarget } from '
 import { useState } from 'react'
 import { Download, X, Check } from 'lucide-react'
 import { useEditorStore } from '../../store/useEditorStore'
-import { getZoomTransformAtTime, getZoomTransformFromKeyframe, type ZoomTransform } from './zoomTransform'
+import { getZoomTransformFromKeyframe, type ZoomTransform } from './zoomTransform'
 import { PixiRenderer } from '../../lib/PixiRenderer'
 import { StreamingVideoDecoder } from '../../lib/StreamingVideoDecoder'
 import type { EditorProject, ExportSettings, ZoomKeyframe } from '../../types'
@@ -59,7 +59,6 @@ const FORMAT_OPTIONS: ExportFormatOption[] = [
 
 
 const MIN_EXPORT_DURATION_SECONDS = 0.05
-const MEDIA_EVENT_TIMEOUT_MS = 15000
 // ~0.5ms tolerance for floating-point time comparisons near trim boundaries.
 const END_FRAME_EPSILON_SECONDS = 0.0005
 const MAX_UPSCALE_FACTOR = 1.15
@@ -176,46 +175,6 @@ function computeVisibleAnnotationsForTime(
   }
 }
 
-function waitForVideoEvent(
-  video: HTMLVideoElement,
-  eventName: 'loadedmetadata' | 'loadeddata' | 'canplay' | 'seeked'
-): Promise<void> {
-  if (eventName === 'loadedmetadata' && video.readyState >= 1) {
-    return Promise.resolve()
-  }
-  if ((eventName === 'loadeddata' || eventName === 'canplay') && video.readyState >= 2) {
-    return Promise.resolve()
-  }
-  return new Promise((resolve, reject) => {
-    let timeoutId: number | undefined
-
-    const clearListeners = () => {
-      video.removeEventListener(eventName, onDone)
-      video.removeEventListener('error', onError)
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId)
-      }
-    }
-
-    const onDone = () => {
-      clearListeners()
-      resolve()
-    }
-
-    const onError = () => {
-      clearListeners()
-      reject(new Error(`Video failed while waiting for '${eventName}'`))
-    }
-
-    timeoutId = window.setTimeout(() => {
-      clearListeners()
-      reject(new Error(`Timed out waiting for video event '${eventName}'`))
-    }, MEDIA_EVENT_TIMEOUT_MS)
-
-    video.addEventListener(eventName, onDone, { once: true })
-    video.addEventListener('error', onError, { once: true })
-  })
-}
 
 
 // ---------------------------------------------------------------------------
@@ -239,37 +198,6 @@ function waitForVideoEvent(
  * One rAF tick after 'seeked' gives the browser a chance to composite the
  * decoded pixel data into the element before we call drawImage.
  */
-async function seekToFrame(video: HTMLVideoElement, time: number): Promise<void> {
-  // Already at this timestamp with data available — nothing to do.
-  if (Math.abs(video.currentTime - time) < 0.0001 && video.readyState >= 2) {
-    return
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const timeoutId = window.setTimeout(() => {
-      video.removeEventListener('error', onError)
-      reject(new Error('Timed out waiting for decoded video frame'))
-    }, MEDIA_EVENT_TIMEOUT_MS)
-
-    const onError = () => {
-      window.clearTimeout(timeoutId)
-      reject(new Error('Video error during seek'))
-    }
-
-    // 'seeked' fires when the seek has completed and the frame at currentTime
-    // is decoded. One rAF tick lets the compositor finish painting it.
-    video.addEventListener('seeked', () => {
-      requestAnimationFrame(() => {
-        window.clearTimeout(timeoutId)
-        video.removeEventListener('error', onError)
-        resolve()
-      })
-    }, { once: true })
-
-    video.addEventListener('error', onError, { once: true })
-    video.currentTime = time
-  })
-}
 
 async function loadBackgroundImage(project: EditorProject): Promise<HTMLImageElement | null> {
   const { background } = project

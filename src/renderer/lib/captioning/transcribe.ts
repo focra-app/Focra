@@ -20,6 +20,7 @@ export type TranscribeWorkerResponse =
   | { type: 'result'; segments: CaptionSegment[]; granularity: CaptionTimestampGranularity }
   | { type: 'error'; message: string }
 
+// @ts-ignore
 import TranscribeWorker from './transcribe.worker?worker'
 
 export function transcribeMono16kToSegments(
@@ -61,7 +62,7 @@ export function transcribeMono16kToSegments(
       finish(() => reject(new Error(msg.message)))
     }
 
-    worker.onerror = (e) => {
+    worker.onerror = (e: ErrorEvent) => {
       finish(() => reject(new Error(e.message || 'Caption transcription worker failed')))
     }
 

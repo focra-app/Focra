@@ -74,7 +74,6 @@ export async function extractMono16kFromVideoUrl(
     ) {
       throw new Error('Invalid audio data')
     }
-    const durationSec = audioBuffer.duration
     const mono = mixToMono(audioBuffer)
     const fromRate = audioBuffer.sampleRate
     

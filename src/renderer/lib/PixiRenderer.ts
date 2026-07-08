@@ -15,7 +15,7 @@ const MOTION_BLUR_SCALE_FACTOR = 1.2
 const MIN_VISIBLE_MOTION_BLUR_PX = 0.5
 
 export class PixiRenderer {
-  private app: Application
+  public app: Application
   private videoSprite: Sprite | null = null
   private bgGraphics: Graphics | null = null
   private videoContainer: Container
@@ -25,7 +25,7 @@ export class PixiRenderer {
   private annotationCtx: CanvasRenderingContext2D
   private cursorGraphics: Graphics | null = null
   private motionBlurFilter: MotionBlurFilter | null = null
-  private lastRenderTime: number = -1
+
   private isDestroyed: boolean = false
   private offscreenCanvas: OffscreenCanvas | null = null
   private offscreenCtx: OffscreenCanvasRenderingContext2D | null = null
@@ -143,7 +143,6 @@ export class PixiRenderer {
 
     if (videoEl.readyState >= 2 && this.videoSprite) {
       this.videoSprite.texture.source.update()
-      this.lastRenderTime = renderTime
 
       const { scale, tx, ty, motionBlur } = precomputed?.zoomTransform ?? getZoomTransformAtTime(project.zoomKeyframes, renderTime)
 
@@ -164,10 +163,9 @@ export class PixiRenderer {
         dw = availH * ratio
       }
       
-      const frame = new Rectangle(srcX, srcY, srcW, srcH)
       if (srcW > 0 && srcH > 0) {
         if (this.videoSprite.texture.frame.x !== srcX || this.videoSprite.texture.frame.y !== srcY || this.videoSprite.texture.frame.width !== srcW || this.videoSprite.texture.frame.height !== srcH) {
-          this.videoSprite.texture.frame = new Rectangle(srcX, srcY, srcW, srcH)
+          this.videoSprite.texture = new Texture({ source: this.videoSprite.texture.source, frame: new Rectangle(srcX, srcY, srcW, srcH) })
         }
       }
       
@@ -441,7 +439,7 @@ export class PixiRenderer {
       
       if (srcW > 0 && srcH > 0) {
         if (this.videoSprite.texture.frame.x !== srcX || this.videoSprite.texture.frame.y !== srcY || this.videoSprite.texture.frame.width !== srcW || this.videoSprite.texture.frame.height !== srcH) {
-          this.videoSprite.texture.frame = new Rectangle(srcX, srcY, srcW, srcH)
+          this.videoSprite.texture = new Texture({ source: this.videoSprite.texture.source, frame: new Rectangle(srcX, srcY, srcW, srcH) })
         }
       }
       
