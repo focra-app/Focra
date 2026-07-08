@@ -60,7 +60,7 @@ Focra is a **free and open-source screen recording application** built with Elec
 - **Resolutions**: 720p, 1080p, 1440p, 4K
 - **Aspect ratios**: 16:9, 4:3, 1:1, 9:16
 - **Frame rates**: 30 fps or 60 fps
-- **Format**: WebM (VP9 + Opus)
+- **Format**: WebM (VP9 + Opus) and MP4 (H.264 + AAC)
 - **Native save dialog** with secure, token-based file writes
 
 ### 🖥️ Platform Support
@@ -145,7 +145,6 @@ The editor lets you review, adjust, or remove any auto-generated keyframe, add t
 
 ## Roadmap
 
-- [ ] MP4 (H.264/AAC) export support
 - [ ] Custom zoom easing curves
 - [ ] Cursor highlight and click effects
 - [ ] Project save/load (`.focra` project format)
