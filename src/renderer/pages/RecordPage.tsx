@@ -5,7 +5,7 @@ import RecordingControls from '../components/recording/RecordingControls'
 import RecordingPreview from '../components/recording/RecordingPreview'
 import type { CaptureBounds, DesktopSource, RecordingResult, ZoomKeyframe, MouseEventData } from '../types'
 // @ts-ignore
-import appLogo from '../assets/focra-logo.svg'
+import appLogo from '../assets/focra-logo.png'
 
 const TARGET_FRAME_RATE = 60
 
