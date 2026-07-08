@@ -8,7 +8,7 @@ A cross-platform alternative to Screen Studio  with auto-zoom, annotations, back
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/iamtatenda/Focra/releases)
-[![Version](https://img.shields.io/badge/version-0.1.0-orange)](https://github.com/iamtatenda/Focra/releases)
+[![Version](https://img.shields.io/badge/version-0.6.7-orange)](https://github.com/iamtatenda/Focra/releases)
 [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/UI-React%2018-61DAFB?logo=react)](https://react.dev/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
