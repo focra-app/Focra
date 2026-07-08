@@ -8,8 +8,8 @@
 A cross-platform alternative to Screen Studio  with auto-zoom, annotations, background customization, and export for free.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/iamtatenda/Focra/releases)
-[![Version](https://img.shields.io/badge/version-0.6.7-orange)](https://github.com/iamtatenda/Focra/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/focra-app/Focra/releases)
+[![Version](https://img.shields.io/badge/version-0.6.7-orange)](https://github.com/focra-app/Focra/releases)
 [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/UI-React%2018-61DAFB?logo=react)](https://react.dev/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -48,6 +48,7 @@ Focra is a **free and open-source screen recording application** built with Elec
   - Optional motion blur
 
 ### ✂️ Editing
+- **Auto-Captioning** — generates on-screen, customizable captions using local AI (Whisper)
 - **Zoom keyframe editor** — add, modify, and delete zoom animations
 - **Text annotations** — add styled text overlays at any point in the timeline
 - **Arrow annotations** — draw directional arrows to highlight UI elements
@@ -73,9 +74,9 @@ Focra is a **free and open-source screen recording application** built with Elec
 
 ## Download
 
-> **Note:** Focra is currently in early development (v0.1.0). Pre-built binaries will be available on the [Releases](https://github.com/iamtatenda/Focra/releases) page.
+You can download pre-built installers for macOS, Windows, and Linux on the [Releases](https://github.com/focra-app/Focra/releases) page.
 
-To run Focra today, follow the [Getting Started](#getting-started) guide to build from source.
+To run Focra from source, follow the [Getting Started](#getting-started) guide.
 
 ---
 
@@ -91,7 +92,7 @@ To run Focra today, follow the [Getting Started](#getting-started) guide to buil
 
 ```bash
 # Clone the repository
-git clone https://github.com/iamtatenda/Focra.git
+git clone https://github.com/focra-app/Focra.git
 cd Focra
 
 # Install dependencies
@@ -136,6 +137,7 @@ The editor lets you review, adjust, or remove any auto-generated keyframe, add t
 | UI | React 18 + TypeScript |
 | Styling | Tailwind CSS 3 |
 | State | Zustand |
+| AI / ML | Transformers.js (Whisper) |
 | Icons | Lucide React |
 | Packaging | electron-builder |
 
@@ -143,7 +145,6 @@ The editor lets you review, adjust, or remove any auto-generated keyframe, add t
 
 ## Roadmap
 
-- [ ] Pre-built release binaries for macOS, Windows, and Linux
 - [ ] MP4 (H.264/AAC) export support
 - [ ] Custom zoom easing curves
 - [ ] Cursor highlight and click effects
