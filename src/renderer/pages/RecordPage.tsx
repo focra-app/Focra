@@ -109,8 +109,11 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
     }
 
     const startPreview = async () => {
-      if (!selectedSource || isRecording) {
+      if (!selectedSource) {
         setStream(null)
+        return
+      }
+      if (isRecording) {
         return
       }
 
@@ -120,16 +123,14 @@ export default function RecordPage({ onRecordingComplete }: RecordPageProps) {
 
         const clampedWidth = captureBounds.width; const clampedHeight = captureBounds.height;
 
-        const s = await navigator.mediaDevices.getUserMedia({
+        await window.electronAPI.setRecordingSource(selectedSource.id)
+        const s = await navigator.mediaDevices.getDisplayMedia({
           audio: false,
           video: {
-            mandatory: {
-              chromeMediaSource: 'desktop',
-              chromeMediaSourceId: selectedSource.id,
-            },
             width: { ideal: clampedWidth },
             height: { ideal: clampedHeight },
-            frameRate: { ideal: 30, max: 60 }
+            frameRate: { ideal: 30, max: 60 },
+            cursor: 'never'
           } as any
         })
 

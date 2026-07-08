@@ -324,11 +324,9 @@ async function renderVideoWithEffects(
       })
     }
 
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
+    const container = document.createElement('div')
     const renderer = new PixiRenderer()
-    await renderer.init(canvas, { width, height })
+    await renderer.init(container, { width, height })
 
     const bgImage = await loadBackgroundImage(project)
 
@@ -480,7 +478,7 @@ async function renderVideoWithEffects(
           visibleAnnotations
         })
 
-        const canvasFrame = new VideoFrame(canvas, { timestamp: exportTimestampUs })
+        const canvasFrame = new VideoFrame(renderer.getCanvas(), { timestamp: exportTimestampUs })
         const keyFrame = currentFrameIndex % (settings.fps * 2) === 0 // Keyframe every 2 seconds
         
         videoEncoder.encode(canvasFrame, { keyFrame })

@@ -39,6 +39,10 @@ export class PixiRenderer {
     this.annotationCtx = this.annotationCanvas.getContext('2d')!
   }
 
+  public getCanvas(): HTMLCanvasElement {
+    return this.app.canvas
+  }
+
   public async init(container: HTMLDivElement, config: PixiRendererConfig) {
     await this.app.init({
       preference: 'webgl',
